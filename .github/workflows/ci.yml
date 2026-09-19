@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: CI only reads the repository.
+permissions:
+  contents: read
+
+env:
+  GOLANGCI_LINT_VERSION: 2.13.2
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify go.mod is tidy
+        shell: bash
+        run: |
+          go mod tidy
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "::error::go.mod/go.sum are not tidy. Run 'go mod tidy' and commit the result."
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        shell: bash
+        run: |
+          # The race detector needs cgo and a C toolchain; skip it on Windows,
+          # where that dependency is the flakiest, and still run the full suite.
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            go test ./... -covermode=atomic -coverprofile=coverage.out
+          else
+            go test ./... -race -covermode=atomic -coverprofile=coverage.out
+          fi
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: error
+
+  # The plan claims six static targets build from one runner. Prove it rather
+  # than asserting it.
+  cross-compile:
+    name: cross-compile (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o /dev/null ./...
+
+  lint-go:
+    name: lint (go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install golangci-lint
+        run: |
+          set -euo pipefail
+          url="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+          curl -sSL -o /tmp/golangci-lint.tar.gz "$url"
+          tar -xzf /tmp/golangci-lint.tar.gz -C /tmp
+          install -m 0755 "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint" "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+
+      - name: Verify config
+        run: golangci-lint config verify
+
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  lint-shell:
+    name: lint (shell)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck -s sh warpbench.sh
+
+      - name: shellcheck (tests)
+        run: shellcheck -s bash tests/launcher_test.sh tools/check-servers.sh
+
+      - name: Launcher contract tests
+        run: bash tests/launcher_test.sh
+
+  lint-powershell:
+    name: lint (powershell)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Import-Module PSScriptAnalyzer
+          $findings = Invoke-ScriptAnalyzer -Path ./warpbench.ps1 -Severity Warning,Error
+          if ($findings) {
+            $findings | Format-Table -AutoSize RuleName, Line, Message | Out-String -Width 200 | Write-Host
+            throw "PSScriptAnalyzer reported $($findings.Count) issue(s)"
+          }
+          Write-Host "PSScriptAnalyzer: clean"

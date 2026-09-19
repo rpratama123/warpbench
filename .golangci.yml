@@ -1,0 +1,37 @@
+# golangci-lint v2 configuration.
+#
+# The gate for warpbench is that this reports nothing. Keep the linter set
+# deliberately small: a measurement tool's credibility depends on the code being
+# obviously correct, not on satisfying every opinionated check.
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # "standard" brings errcheck, govet, ineffassign, staticcheck and unused.
+  default: standard
+  enable:
+    - bodyclose      # an unclosed HTTP response body would leak a connection per sample
+    - errorlint      # correct %w wrapping and errors.Is/As usage
+    - misspell
+    - nolintlint     # a stale //nolint is worse than none
+    - unconvert
+  settings:
+    revive:
+      rules:
+        # Exported symbols already carry doc comments where they matter; forcing
+        # a comment on every exported test helper adds noise, not clarity.
+        - name: exported
+          disabled: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  # Report every occurrence rather than a truncated sample.
+  max-issues-per-linter: 0
+  max-same-issues: 0

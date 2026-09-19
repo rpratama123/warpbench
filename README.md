@@ -32,7 +32,7 @@ No admin/root, no pre-installed dependencies beyond the OS.
 | Phase | Deliverable | Status |
 |---|---|---|
 | 1 | [`PLAN.md`](PLAN.md) — architecture, methodology, schema, risks | ✅ approved |
-| 2 | Repo scaffold, `go.mod`, launchers, CI | ⬜ |
+| 2 | Repo scaffold, `go.mod`, launchers, CI | ✅ |
 | 3 | Server list: schema, loader, cache, `servers.json` v1 | ⬜ |
 | 4 | Measurement: stats, ping/timings, four throughput adapters | ⬜ |
 | 5 | Runner, `--phase` / `--compare`, JSON schema | ⬜ |
@@ -64,6 +64,29 @@ accepts a POST, iperf3 ports accept TCP). It is what produced the evidence in
 ```sh
 bash tools/check-servers.sh endpoints.tsv
 ```
+
+## Development
+
+Requires Go (see `go.mod`) plus `shellcheck`, and `pwsh` with `PSScriptAnalyzer`
+for the PowerShell launcher. Runs on Linux, macOS and Windows.
+
+```sh
+go build ./...
+go test ./...
+golangci-lint run ./...      # v2 config; `golangci-lint config verify` first
+shellcheck -s sh warpbench.sh
+bash tests/launcher_test.sh  # launcher contract tests against a fake release
+```
+
+The launcher contract tests spin up a local HTTP server that impersonates a
+GitHub release, then assert the launchers download, verify, cache, refuse bad
+checksums, forward arguments, and propagate exit codes. They need `python3` and
+an **exec-capable** scratch directory — if `/tmp` is mounted `noexec`, point
+them elsewhere with `WARPBENCH_TEST_TMPDIR`.
+
+The binary itself is a scaffold at present; `warpbench --doctor` reports the
+environment facts (platform, console interactivity, cache directory) that the
+launchers and the binary must agree on.
 
 ## Licence
 
