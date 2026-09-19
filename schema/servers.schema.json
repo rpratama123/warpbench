@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/rpratama123/warpbench/main/schema/servers.schema.json",
+  "title": "warpbench server list",
+  "description": "Curated list of public measurement targets. Fetched at runtime from the repository's main branch, cached, and falling back to a copy compiled into the binary. See PLAN.md section 4.",
+  "type": "object",
+  "required": ["schema", "revision", "groups", "servers"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "Schema version. Bump only for a breaking change to this document's shape.",
+      "const": 2
+    },
+    "revision": {
+      "description": "Date this list was last validated, ISO 8601. Recorded in every report so results can be attributed to an exact list.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "groups": {
+      "description": "Geographic groups. Data, not code: the TUI derives its grouping from this array.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/group" }
+    },
+    "servers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/server" }
+    }
+  },
+  "$defs": {
+    "group": {
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,15}$"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
+      }
+    },
+
+    "capability": {
+      "description": "ping = ICMP or TCP-connect RTT; download/upload = throughput; timings = DNS/TCP/TLS/TTFB via httptrace.",
+      "enum": ["ping", "download", "upload", "timings"]
+    },
+
+    "flag": {
+      "description": "Machine-readable annotations that drive report footnotes and TUI badges.",
+      "enum": [
+        "footnote:cloudflare-edge",
+        "control:domestic",
+        "best-effort"
+      ]
+    },
+
+    "iperf3": {
+      "type": "object",
+      "required": ["host", "port_range", "reverse_download"],
+      "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string", "minLength": 1 },
+        "port_range": {
+          "description": "Inclusive [first, last] candidate port. A single port is expressed as [n, n]. Servers advertise ranges because individual ports are often busy.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "reverse_download": {
+          "description": "Whether the server supports -R, i.e. server-to-client, which is how a download is measured with iperf3.",
+          "type": "boolean"
+        }
+      }
+    },
+
+    "adapter_opts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_bytes": {
+          "description": "A sample smaller than this is flagged as undersized rather than silently averaged.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_bytes": {
+          "description": "Runaway guard only; the sample duration, not this cap, governs the measurement window.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+
+    "server": {
+      "type": "object",
+      "required": [
+        "id",
+        "group",
+        "name",
+        "protocol",
+        "ping_host",
+        "capabilities",
+        "tier"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Stable identifier. Appears in reports, so never reuse one for a different host.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,47}$"
+        },
+        "group": {
+          "description": "Must match a group id declared in the top-level groups array.",
+          "type": "string"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string" },
+        "city": { "type": "string" },
+        "country": {
+          "description": "ISO 3166-1 alpha-2.",
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "protocol": {
+          "enum": ["librespeed", "http-file", "cloudflare", "iperf3"]
+        },
+        "ping_host": {
+          "description": "Host used for latency. Separate from the download host because they legitimately differ (Cloudflare, iperf3).",
+          "type": "string",
+          "minLength": 1
+        },
+        "download_url": { "type": ["string", "null"] },
+        "upload_url": { "type": ["string", "null"] },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capability" }
+        },
+        "tier": {
+          "description": "quick-tier servers are the ones quick mode runs; target 1-2 per group.",
+          "enum": ["quick", "extended"]
+        },
+        "flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/flag" }
+        },
+        "iperf3": { "$ref": "#/$defs/iperf3" },
+        "adapter_opts": { "$ref": "#/$defs/adapter_opts" },
+        "notes": { "type": "string" }
+      },
+
+      "allOf": [
+        {
+          "description": "The iperf3 block is required by, and exclusive to, the iperf3 protocol.",
+          "if": {
+            "required": ["protocol"],
+            "properties": { "protocol": { "const": "iperf3" } }
+          },
+          "then": { "required": ["iperf3"] },
+          "else": { "not": { "required": ["iperf3"] } }
+        },
+        {
+          "description": "Declaring the download capability requires somewhere to download from: a URL, or the iperf3 block.",
+          "if": {
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": { "contains": { "const": "download" } },
+              "protocol": { "not": { "const": "iperf3" } }
+            }
+          },
+          "then": { "required": ["download_url"] }
+        },
+        {
+          "description": "Declaring the upload capability requires an upload endpoint. Only iperf3 and Cloudflare can offer one without upload_url, and iperf3 is excluded here.",
+          "if": {
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": { "contains": { "const": "upload" } },
+              "protocol": { "not": { "const": "iperf3" } }
+            }
+          },
+          "then": { "required": ["upload_url"] }
+        },
+        {
+          "description": "A server that declares no download capability must not carry a download URL, to keep capabilities and fields honest.",
+          "if": {
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": { "not": { "contains": { "const": "download" } } }
+            }
+          },
+          "then": {
+            "properties": {
+              "download_url": { "type": "null" }
+            }
+          }
+        },
+        {
+          "description": "Likewise for upload.",
+          "if": {
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": { "not": { "contains": { "const": "upload" } } }
+            }
+          },
+          "then": {
+            "properties": {
+              "upload_url": { "type": "null" }
+            }
+          }
+        },
+        {
+          "description": "port_range must be ordered, which plain array constraints cannot express.",
+          "if": { "required": ["iperf3"] },
+          "then": {
+            "properties": {
+              "iperf3": {
+                "properties": {
+                  "port_range": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -34,6 +34,19 @@ probe() {
   local id="$1" kind="$2" url="$3"
   local method="" code="" ip="" xc="" total="" bytes=""
 
+  # iperf3 has no HTTP surface, so liveness is a TCP connect to the advertised
+  # port. The caller passes "host:port" as the target.
+  if [ "$kind" = "iperf3" ]; then
+    local ihost="${url%%:*}" iport="${url##*:}" iip
+    iip=$(getent ahostsv4 "$ihost" 2>/dev/null | awk '{print $1; exit}')
+    if timeout 8 bash -c "exec 3<>/dev/tcp/$ihost/$iport" 2>/dev/null; then
+      printf '%s\tiperf3\topen\tTCP\texit=0\tgot=0\ttotal=?\t%s\t\n' "$id" "${iip:-none}"
+    else
+      printf '%s\tiperf3\tclosed\tTCP\texit=1\tgot=0\ttotal=?\t%s\tTCP_FAIL\n' "$id" "${iip:-none}"
+    fi
+    return
+  fi
+
   : > "$HDR"
 
   if [ "$kind" = "trace" ]; then

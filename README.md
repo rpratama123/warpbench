@@ -33,7 +33,7 @@ No admin/root, no pre-installed dependencies beyond the OS.
 |---|---|---|
 | 1 | [`PLAN.md`](PLAN.md) — architecture, methodology, schema, risks | ✅ approved |
 | 2 | Repo scaffold, `go.mod`, launchers, CI | ✅ |
-| 3 | Server list: schema, loader, cache, `servers.json` v1 | ⬜ |
+| 3 | Server list: schema, loader, cache, `servers.json` v1 | ✅ |
 | 4 | Measurement: stats, ping/timings, four throughput adapters | ⬜ |
 | 5 | Runner, `--phase` / `--compare`, JSON schema | ⬜ |
 | 6 | TUI + ASCII fallback | ⬜ |
@@ -54,16 +54,69 @@ curl -fsSL <short-link>/sh | bash
 irm <short-link>/ps1 | iex
 ```
 
-## Verifying the server list
+## The server list
 
-[`tools/check-servers.sh`](tools/check-servers.sh) validates every endpoint in
-`servers.json` (ping host resolves, download URL returns 200/206, upload endpoint
-accepts a POST, iperf3 ports accept TCP). It is what produced the evidence in
-`PLAN.md` §2, and the same script backs the weekly validation Action:
+[`servers.json`](servers.json) is the curated set of measurement targets,
+grouped Indonesia → Singapore → Tokyo → Europe → United States. It is fetched at
+runtime from this repository's `main` branch, so adding or retiring a target
+needs no release. Resolution order is **remote → cache → embedded**, with
+`--servers <path|url>` overriding all three; the embedded copy is compiled into
+the binary so warpbench works with no network at all. Every report records which
+source won and the list `revision`.
+
+Each entry declares a `protocol` (`librespeed`, `http-file`, `cloudflare` or
+`iperf3`), an explicit `capabilities` array, and a `tier` of `quick` or
+`extended`. The shape is defined once in
+[`schema/servers.schema.json`](schema/servers.schema.json), which is enforced at
+runtime against the embedded copy — so the schema is the actual contract, not
+documentation that can drift.
+
+Two deliberate quirks worth knowing:
+
+- **Upload coverage in APAC comes from iperf3**, not LibreSpeed. The canonical
+  LibreSpeed community list has one APAC server and it returns 403, so iperf3 is
+  a first-class protocol rather than an optional extra.
+- **`id-cf-cgk` is footnoted.** With WARP on, that path never leaves Cloudflare's
+  network, so it measures ISP-to-nearest-edge only and must not be read as an
+  end-to-end international result. It is also the reason `id-datautama` — a
+  domestic Ubuntu mirror, marked as a control — is in the list: it is what shows
+  the effect is specific to international transit.
+
+A bad entry is skipped individually with a warning naming it and the reason, so
+one stale host cannot take the whole list down. Structural problems fail hard.
+
+### Validating the list
 
 ```sh
-bash tools/check-servers.sh endpoints.tsv
+go run ./tools/validate-servers -v
 ```
+
+This loads the list through the same code path the binary uses — so a schema
+violation or any dropped entry fails the run — then probes every target: DNS for
+`ping_host`, a bounded HTTP request for download and upload endpoints, and a TCP
+connect for iperf3 ports. It exits non-zero if anything fails, which is what
+[the weekly workflow](.github/workflows/validate-servers.yml) uses to open an
+issue when a target rots.
+
+[`tools/check-servers.sh`](tools/check-servers.sh) is the ad-hoc shell prober,
+useful for testing candidate hosts that are not in the list yet:
+
+```sh
+printf 'my-host\tdownload\thttps://example.com/100MB.bin\nmy-iperf\tiperf3\t1.2.3.4:5201\n' \
+  | bash tools/check-servers.sh
+```
+
+### Editing the list
+
+`go:embed` cannot reach outside its own package, so
+[`internal/serverlist/embedded/`](internal/serverlist/embedded) holds generated
+copies. After editing `servers.json` or the schema:
+
+```sh
+go generate ./...
+```
+
+A test fails if the copies drift, so forgetting this is caught locally and in CI.
 
 ## Development
 

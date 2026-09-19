@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -90,8 +91,11 @@ func TestBareInvocationReportsUnimplemented(t *testing.T) {
 	if stdout != "" {
 		t.Errorf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "scaffold") {
-		t.Errorf("stderr = %q, want it to explain this is a scaffold", stderr)
+	if !strings.Contains(stderr, "not implemented") {
+		t.Errorf("stderr = %q, want it to explain the engine is not implemented", stderr)
+	}
+	if !strings.Contains(stderr, "--doctor") {
+		t.Errorf("stderr = %q, want it to point at --doctor", stderr)
 	}
 }
 
@@ -99,12 +103,24 @@ func TestDoctorReportsCacheDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "warpbench")
 	t.Setenv("WARPBENCH_CACHE_DIR", dir)
 
-	code, stdout, stderr := runCapture(t, []string{"--doctor"}, alwaysTTY)
+	// --offline keeps this hermetic: it must not touch the network in CI.
+	code, stdout, stderr := runCapture(t, []string{"--doctor", "--offline"}, alwaysTTY)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d (stderr: %s)", code, exitOK, stderr)
 	}
-	for _, want := range []string{"warpbench doctor", "platform", "interactive      true", dir, "writable"} {
+	for _, want := range []string{
+		"warpbench doctor",
+		"platform",
+		"interactive      true",
+		dir,
+		"writable",
+		"server list",
+		"list source",
+		"embedded",
+		"servers          ",
+		"groups",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout missing %q\n--- got ---\n%s", want, stdout)
 		}
@@ -116,7 +132,7 @@ func TestDoctorReportsCacheDir(t *testing.T) {
 func TestDoctorHonoursNoTTY(t *testing.T) {
 	t.Setenv("WARPBENCH_CACHE_DIR", filepath.Join(t.TempDir(), "warpbench"))
 
-	code, stdout, _ := runCapture(t, []string{"--doctor", "--no-tty"}, alwaysTTY)
+	code, stdout, _ := runCapture(t, []string{"--doctor", "--no-tty", "--offline"}, alwaysTTY)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d", code, exitOK)
@@ -143,7 +159,7 @@ func TestDoctorFailsOnUnwritableCacheDir(t *testing.T) {
 	}
 	t.Setenv("WARPBENCH_CACHE_DIR", filepath.Join(blocker, "warpbench"))
 
-	code, stdout, _ := runCapture(t, []string{"--doctor"}, neverTTY)
+	code, stdout, _ := runCapture(t, []string{"--doctor", "--offline"}, neverTTY)
 
 	if code != exitError {
 		t.Errorf("exit code = %d, want %d", code, exitError)
@@ -158,5 +174,69 @@ func TestInteractiveConsoleIsFalseWithoutTerminal(t *testing.T) {
 	// This is the guard that keeps the TUI from being drawn into a pipeline.
 	if interactiveConsole() {
 		t.Error("interactiveConsole() = true under go test; want false")
+	}
+}
+
+// An unusable --servers value must fail loudly rather than silently falling
+// back to the built-in list: the user asked for a specific list.
+func TestDoctorFailsOnBadServersOverride(t *testing.T) {
+	t.Setenv("WARPBENCH_CACHE_DIR", filepath.Join(t.TempDir(), "warpbench"))
+
+	missing := filepath.Join(t.TempDir(), "nope.json")
+	code, stdout, _ := runCapture(t, []string{"--doctor", "--offline", "--servers", missing}, neverTTY)
+
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stdout, "server list      ERROR") {
+		t.Errorf("stdout = %q, want a server-list error line", stdout)
+	}
+}
+
+func TestDoctorUsesProvidedServerList(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WARPBENCH_CACHE_DIR", filepath.Join(dir, "warpbench"))
+
+	custom := filepath.Join(dir, "custom.json")
+	list := `{"schema":2,"revision":"2026-01-02","groups":[{"id":"sg","name":"S"}],
+		"servers":[{"id":"sg-1","group":"sg","name":"S","protocol":"http-file",
+		"ping_host":"e.com","download_url":"https://e.com/f",
+		"capabilities":["ping","download"],"tier":"quick"}]}`
+	if err := os.WriteFile(custom, []byte(list), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, _ := runCapture(t, []string{"--doctor", "--offline", "--servers", custom}, neverTTY)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stdout: %s)", code, exitOK, stdout)
+	}
+	for _, want := range []string{"override", "2026-01-02", custom, "1 across 1 groups"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q\n--- got ---\n%s", want, stdout)
+		}
+	}
+}
+
+func TestOfflineAndServersFlagsParse(t *testing.T) {
+	opts, err := parseArgs([]string{"--offline", "--servers", "/tmp/x.json"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if !opts.offline {
+		t.Error("--offline not set")
+	}
+	if opts.servers != "/tmp/x.json" {
+		t.Errorf("--servers = %q, want /tmp/x.json", opts.servers)
+	}
+}
+
+func TestUserAgentIdentifiesUs(t *testing.T) {
+	ua := userAgent()
+	if !strings.HasPrefix(ua, "warpbench/") {
+		t.Errorf("userAgent() = %q, want a warpbench/ prefix", ua)
+	}
+	if !strings.Contains(ua, repoURL) {
+		t.Errorf("userAgent() = %q, want it to point at the repository", ua)
 	}
 }

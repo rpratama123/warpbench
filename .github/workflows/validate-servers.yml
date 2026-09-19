@@ -1,0 +1,93 @@
+name: Validate server list
+
+# Public measurement targets rot: providers retire speedtest hosts, community
+# iperf3 servers come and go, university mirrors move. This job revalidates
+# every entry weekly and opens an issue when something breaks, so the list does
+# not silently degrade into results that quietly measure fewer servers.
+
+on:
+  schedule:
+    # Mondays at 02:17 UTC. Off the hour to avoid the top-of-hour runner crush.
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "servers.json"
+      - "schema/servers.schema.json"
+      - "tools/validate-servers/**"
+      - "internal/serverlist/**"
+      - ".github/workflows/validate-servers.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  validate:
+    name: validate servers.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # A drift check first: validating the embedded copy while the canonical
+      # file has changed would validate the wrong bytes.
+      - name: Check the embedded copy is in sync
+        run: |
+          go generate ./...
+          if ! git diff --quiet; then
+            echo "::error::internal/serverlist/embedded is stale. Run 'go generate ./...' and commit."
+            git diff --stat
+            exit 1
+          fi
+
+      - name: Validate every entry
+        run: go run ./tools/validate-servers -v -timeout 25s
+
+      - name: Open an issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REVISION: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+
+          # Ensure the label exists; gh issue create fails on an unknown label.
+          gh label create server-list \
+            --description "Weekly server-list validation failures" \
+            --color FBCA04 2>/dev/null || true
+
+          # Only one open issue at a time: comment on the existing one instead
+          # of filing a duplicate every week.
+          existing=$(gh issue list --label server-list --state open --limit 1 --json number --jq '.[0].number // empty')
+
+          body=$(printf '%s\n' \
+            "The weekly server-list validation failed, so at least one target in \`servers.json\` is unreachable or no longer matches the schema." \
+            "" \
+            "Run: ${RUN_URL}" \
+            "" \
+            "Reproduce locally:" \
+            "" \
+            '```sh' \
+            "go run ./tools/validate-servers -v" \
+            '```' \
+            "" \
+            "Fix by updating or removing the failing entry in \`servers.json\`, then run \`go generate ./...\` and commit both the list and the regenerated embedded copy." \
+            "" \
+            "Remember: \`revision\` in \`servers.json\` should be bumped to the date of the fix, because every report records it.")
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "Commented on existing issue #$existing"
+          else
+            gh issue create \
+              --title "Server list validation failed" \
+              --label server-list \
+              --body "$body"
+          fi

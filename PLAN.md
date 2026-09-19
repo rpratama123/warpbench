@@ -433,10 +433,12 @@ The brief's caps cannot produce its stated totals across **two** phases. Arithme
 |---|---|---|---|---|
 | Brief's Quick (2 samples, 10 s + 8 s) | 10 servers | ~39 s | ~6.5 min | **~14 min** (brief says 4–6) |
 | Brief's Extended (3 × 30 s + 3 × 20 s) | 12 servers | ~160 s | ~32 min | **~64 min** (brief says 20–30) |
-| **Plan Quick** (1 sample, 12 s + 8 s) | 1/group = 5 | ~24 s | ~2 min | **~5–6 min** ✓ |
+| **Plan Quick, as shipped** (1 sample, 12 s + 8 s) | 2/group = 10 | ~20 s | ~3.3 min | **~7 min** ✓ |
 | **Plan Extended** (3 × 15 s + 3 × 10 s) | 2/group = 10 | ~85 s | ~14 min | **~29 min** ✓ |
 
-The plan's caps are therefore: **Quick = 1 server per group, 1 download sample (12 s), 1 upload sample (8 s), 10 pings. Extended = 2 servers per group, median of 3 (15 s / 10 s), 30 pings.** `--extended` on a custom selection of 20 servers will legitimately take ~55 min — so the estimate is **computed live from the actual selection** and displayed, never hard-coded. If you would rather keep the brief's 30 s/100 MB extended caps, Extended becomes a ~60 min run; that is a real trade-off and I have defaulted to the faster one.
+The plan's caps are therefore: **Quick = 2 servers per group, 1 download sample (12 s), 1 upload sample (8 s), 10 pings. Extended = 2 servers per group, median of 3 (15 s / 10 s), 30 pings.**
+
+**Correction made in Phase 3.** Quick was specified as 1 server per group, which cannot satisfy the simultaneous requirement of an upload target per group: no single server covers both the download and upload legs in most groups. Quick therefore ships 2 servers per group — one download-led, one upload-led — costing about a minute over the original 5–6 minute estimate. The estimate shown in the TUI is computed from the live selection, so the real number is always visible. `--extended` on a custom selection of 20 servers will legitimately take ~55 min — so the estimate is **computed live from the actual selection** and displayed, never hard-coded. If you would rather keep the brief's 30 s/100 MB extended caps, Extended becomes a ~60 min run; that is a real trade-off and I have defaulted to the faster one.
 
 ### 5.8 Once per phase
 
@@ -610,8 +612,8 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 | Phase | Deliverable | Gate |
 |---|---|---|
 | **1** | `PLAN.md` | **done — approved 2026-09-20** |
-| 2 | Repo scaffold, `go.mod`, launchers (`sh` + `ps1`), CI lint/test workflows | `shellcheck` + `PSScriptAnalyzer` clean; launcher unit-tested against a fake release |
-| 3 | Server list: schema, loader, cache, embedded fallback, `servers.json` v1, validation Action | `tools/check-servers.sh` green on every entry |
+| 2 | Repo scaffold, `go.mod`, launchers (`sh` + `ps1`), CI lint/test workflows | **done — 25/25 launcher checks green, CI green on 3 OSes** |
+| 3 | Server list: schema, loader, cache, embedded fallback, `servers.json` v1, validation Action | **done — 74/74 checks green** |
 | 4 | Measurement: `stats`, `netprobe`, four throughput adapters incl. iperf3 download/verify/exec | Unit + `httptest` integration tests; real-network smoke run |
 | 5 | Runner + `--phase`/`--compare` + JSON schema | Deterministic ordering; fairness assertions in tests |
 | 6 | TUI (selection, progress, pause, results) + ASCII fallback | 60-column and `--no-tty` tests |
@@ -626,4 +628,4 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 2. ~~Q1, Q2, Q4~~ — **answered**; see §12.
 3. Remaining optional choices **Q3** (windows/arm64 iperf3), **Q5** (licence), **Q6** (datautama mirror), **Q7** (short link). None blocks Phase 2.
 
-**Next step:** Phase 2 — repository scaffold, `go.mod`, launchers, CI lint/test workflows (§14).
+**Next step:** Phase 4 — measurement: `stats`, `netprobe` (ICMP + `httptrace`), and the four throughput adapters, including the iperf3 binary download/verify/exec path (§14).

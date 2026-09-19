@@ -2,12 +2,13 @@
 // congested ISP uplink: latency, jitter, packet loss, connection-setup timings,
 // and download/upload throughput, first on the raw ISP path and then over WARP.
 //
-// This is the Phase 2 scaffold. Argument parsing, version reporting,
-// interactive-console detection and cache-directory resolution are real and
-// tested; the measurement engine lands in later phases.
+// The measurement engine lands in later phases. Argument parsing, version
+// reporting, interactive-console detection, cache-directory resolution and
+// server-list loading are real and tested.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/rpratama123/warpbench/internal/config"
+	"github.com/rpratama123/warpbench/internal/serverlist"
 	"github.com/rpratama123/warpbench/internal/version"
 )
 
@@ -32,12 +34,14 @@ const (
 
 const repoURL = "https://github.com/rpratama123/warpbench"
 
-// options holds the flags this scaffold understands. The full documented flag
-// set (--quick/--extended/--phase/--compare/...) arrives with the runner.
+// options holds the flags implemented so far. The remainder of the documented
+// flag set (--quick/--extended/--phase/--compare/...) arrives with the runner.
 type options struct {
 	showVersion bool
 	doctor      bool
 	noTTY       bool
+	offline     bool
+	servers     string
 }
 
 func main() {
@@ -62,6 +66,11 @@ func writef(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format, args...)
 }
 
+// userAgent identifies us to the endpoints we fetch from.
+func userAgent() string {
+	return "warpbench/" + version.Short() + " (+" + repoURL + ")"
+}
+
 func run(args []string, stdout, stderr io.Writer, isTTY func() bool) int {
 	opts, err := parseArgs(args, stderr)
 	if err != nil {
@@ -81,9 +90,8 @@ func run(args []string, stdout, stderr io.Writer, isTTY func() bool) int {
 	}
 
 	writef(stderr, "%s\n\n", version.String())
-	writef(stderr, "This build is the Phase 2 scaffold: the launcher, version and\n")
-	writef(stderr, "console-detection paths work, but the measurement engine is not\n")
-	writef(stderr, "implemented yet, so there is nothing to measure.\n")
+	writef(stderr, "The measurement engine is not implemented yet, so there is nothing to\n")
+	writef(stderr, "measure. Run 'warpbench --doctor' to check the local environment.\n")
 	writef(stderr, "\nPlan and progress: %s\n", repoURL)
 	return exitError
 }
@@ -100,6 +108,8 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	fs.BoolVar(&opts.showVersion, "version", false, "print version information and exit")
 	fs.BoolVar(&opts.doctor, "doctor", false, "report the local environment and exit")
 	fs.BoolVar(&opts.noTTY, "no-tty", false, "never draw a TUI; print plain, non-interactive output")
+	fs.BoolVar(&opts.offline, "offline", false, "do not touch the network; use the cached or embedded server list")
+	fs.StringVar(&opts.servers, "servers", "", "use a server list from `path` or URL instead of the built-in one")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -124,13 +134,15 @@ Usage:
   warpbench [flags]
 
 Flags:
-  --version   print version information and exit
-  --doctor    report the local environment and exit
-  --no-tty    never draw a TUI; print plain, non-interactive output
-  -h, --help  show this help and exit
+  --version        print version information and exit
+  --doctor         report the local environment and exit
+  --no-tty         never draw a TUI; print plain, non-interactive output
+  --offline        do not touch the network; use the cached or embedded list
+  --servers PATH   use a server list from PATH or a URL
+  -h, --help       show this help and exit
 
 Status:
-  This is the Phase 2 scaffold. The measurement engine is not implemented yet.
+  The measurement engine is not implemented yet.
 
 Plan and progress:
   ` + repoURL + `
@@ -140,9 +152,10 @@ func usage(w io.Writer) {
 	_, _ = io.WriteString(w, usageText)
 }
 
-// doctor reports the facts the launchers and the binary must agree on. It exits
-// non-zero when the cache directory cannot be created, which is the one failure
-// that would otherwise surface later as a confusing download error.
+// doctor reports the facts the launchers and the binary must agree on, plus the
+// provenance of the server list. A user debugging a surprising result needs to
+// know whether they measured against a fresh remote revision, a stale cache, or
+// the copy compiled into the binary.
 func doctor(w io.Writer, opts options, isTTY func() bool) int {
 	writef(w, "warpbench doctor\n")
 	writef(w, "  version          %s\n", version.String())
@@ -167,12 +180,29 @@ func doctor(w io.Writer, opts options, isTTY func() bool) int {
 		writef(w, "  cache directory  ERROR: %v\n", err)
 		return exitError
 	}
-
 	if err := checkWritable(dir); err != nil {
 		writef(w, "  cache directory  %s (NOT writable: %v)\n", dir, err)
 		return exitError
 	}
 	writef(w, "  cache directory  %s (writable)\n", dir)
+
+	res, err := serverlist.Load(context.Background(), serverlist.Options{
+		Override:  opts.servers,
+		CacheDir:  dir,
+		Offline:   opts.offline,
+		UserAgent: userAgent(),
+	})
+	if err != nil {
+		writef(w, "  server list      ERROR: %v\n", err)
+		return exitError
+	}
+
+	writef(w, "  server list      %s\n", res.Origin)
+	writef(w, "  list source      %s (revision %s)\n", res.Source, res.Revision)
+	writef(w, "  servers          %d across %d groups\n", len(res.List.Servers), len(res.List.Groups))
+	for _, warn := range res.Warnings {
+		writef(w, "  warning          %s\n", warn)
+	}
 
 	return exitOK
 }
