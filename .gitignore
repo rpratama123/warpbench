@@ -1,0 +1,23 @@
+# Build output
+/warpbench
+/warpbench.exe
+/dist/
+*.test
+*.out
+coverage.txt
+
+# Go workspace / vendoring scratch
+go.work
+go.work.sum
+
+# Local benchmark artefacts (reports are user output, never committed)
+warpbench-*.md
+warpbench-*.json
+!testdata/**/*.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
