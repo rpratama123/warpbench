@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -247,7 +248,16 @@ func TestTimingsMeasureSetupPhases(t *testing.T) {
 		t.Fatalf("Timings() error = %v", err)
 	}
 
-	if got.Connect <= 0 {
+	// Occurrence, not duration, is the invariant. A loopback connect can finish
+	// faster than the platform clock resolves: Windows measured it as exactly
+	// 0ms in CI while TTFB on the same request was non-zero.
+	if !got.ConnectRan {
+		t.Error("ConnectRan = false, the TCP connect trace did not fire")
+	}
+	if !got.FirstByteRan {
+		t.Error("FirstByteRan = false, the first-byte trace did not fire")
+	}
+	if runtime.GOOS != "windows" && got.Connect <= 0 {
 		t.Error("Connect = 0, want a measured TCP connect")
 	}
 	if got.TTFB <= 0 {
@@ -268,8 +278,11 @@ func TestTimingsMeasureSetupPhases(t *testing.T) {
 	if got.Proto == "" {
 		t.Error("Proto is empty; which HTTP version was used must be recorded")
 	}
-	// Plaintext HTTP, so no TLS phase occurred. It must be reported as absent,
-	// which is exactly zero here.
+	// Plaintext HTTP, so the TLS phase must be reported as not having run,
+	// which is distinct from having run in zero time.
+	if got.TLSRan {
+		t.Error("TLSRan = true for a plaintext request")
+	}
 	if got.TLS != 0 {
 		t.Errorf("TLS = %v, want 0 for a plaintext request", got.TLS)
 	}
@@ -286,6 +299,9 @@ func TestTimingsCaptureTLSHandshake(t *testing.T) {
 		t.Fatalf("Timings() error = %v", err)
 	}
 
+	if !got.TLSRan {
+		t.Error("TLSRan = false, want the handshake trace to have fired")
+	}
 	if got.TLS <= 0 {
 		t.Error("TLS = 0, want a measured handshake")
 	}
@@ -305,8 +321,8 @@ func TestTimingsRejectsErrorStatus(t *testing.T) {
 		t.Fatal("Timings() accepted a 500")
 	}
 	// The phases still happened, so they are still reported.
-	if got.Connect <= 0 {
-		t.Error("Connect = 0 even though the connection succeeded")
+	if !got.ConnectRan {
+		t.Error("ConnectRan = false even though the connection succeeded")
 	}
 	if got.Status != http.StatusInternalServerError {
 		t.Errorf("Status = %d, want 500", got.Status)
@@ -426,6 +442,26 @@ func TestMedianTiming(t *testing.T) {
 	// Descriptive fields come from the last sample rather than being invented.
 	if got.RemoteIP != "c" || got.Proto != "HTTP/1.1" {
 		t.Errorf("descriptive fields = %q/%q, want the last sample's", got.RemoteIP, got.Proto)
+	}
+}
+
+// Occurrence is a union across samples: claiming a phase ran when it never did
+// would misdescribe the connection.
+func TestMedianTimingUnionsPhaseOccurrence(t *testing.T) {
+	got := MedianTiming([]Timing{
+		{ConnectRan: true, TLSRan: false, Total: time.Millisecond},
+		{ConnectRan: true, TLSRan: true, Total: 3 * time.Millisecond},
+		{ConnectRan: false, TLSRan: false, Total: 2 * time.Millisecond},
+	})
+
+	if !got.ConnectRan {
+		t.Error("ConnectRan = false, want true when any sample observed it")
+	}
+	if !got.TLSRan {
+		t.Error("TLSRan = false, want true when any sample observed it")
+	}
+	if got.DNSRan {
+		t.Error("DNSRan = true, but no sample observed it")
 	}
 }
 

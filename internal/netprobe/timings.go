@@ -15,9 +15,15 @@ import (
 
 // Timing is one connection-setup measurement.
 //
-// A zero DNS or TLS value means the phase did not occur for that request (a
-// cached resolver answer, or a plaintext URL), not that it was instantaneous.
-// The report must not present a missing phase as a zero-cost one.
+// Occurrence is tracked separately from duration, because two very different
+// situations both measure as zero: a phase that did not happen (no TLS on a
+// plaintext URL, no DNS for a literal address), and a phase that completed
+// faster than the platform clock can resolve. Windows resolves a loopback
+// connect as 0ms for exactly that reason, which was observed in CI.
+//
+// A report that presented the two identically would be describing the
+// connection wrongly, so callers must read the Ran flags rather than treating a
+// zero duration as "did not happen".
 type Timing struct {
 	DNS        time.Duration
 	Connect    time.Duration
@@ -28,6 +34,12 @@ type Timing struct {
 	Proto      string
 	TLSVersion string
 	Status     int
+
+	// Ran reports which phases actually executed.
+	DNSRan       bool
+	ConnectRan   bool
+	TLSRan       bool
+	FirstByteRan bool
 }
 
 // TimingOptions configures a timings probe.
@@ -68,19 +80,28 @@ func Timings(ctx context.Context, url string, client *http.Client, opts TimingOp
 	)
 
 	trace := &httptrace.ClientTrace{
-		DNSStart: func(httptrace.DNSStartInfo) { dnsStart = time.Now() },
+		DNSStart: func(httptrace.DNSStartInfo) {
+			dnsStart = time.Now()
+			result.DNSRan = true
+		},
 		DNSDone: func(httptrace.DNSDoneInfo) {
 			if !dnsStart.IsZero() {
 				result.DNS = time.Since(dnsStart)
 			}
 		},
-		ConnectStart: func(_, _ string) { connectStart = time.Now() },
+		ConnectStart: func(_, _ string) {
+			connectStart = time.Now()
+			result.ConnectRan = true
+		},
 		ConnectDone: func(_, _ string, err error) {
 			if err == nil && !connectStart.IsZero() {
 				result.Connect = time.Since(connectStart)
 			}
 		},
-		TLSHandshakeStart: func() { tlsStart = time.Now() },
+		TLSHandshakeStart: func() {
+			tlsStart = time.Now()
+			result.TLSRan = true
+		},
 		TLSHandshakeDone: func(state tls.ConnectionState, err error) {
 			if err != nil {
 				return
@@ -97,6 +118,7 @@ func Timings(ctx context.Context, url string, client *http.Client, opts TimingOp
 		},
 		WroteRequest: func(httptrace.WroteRequestInfo) { wroteRequest = time.Now() },
 		GotFirstResponseByte: func() {
+			result.FirstByteRan = true
 			if !wroteRequest.IsZero() {
 				result.TTFB = time.Since(wroteRequest)
 			}
@@ -197,16 +219,31 @@ func MedianTiming(timings []Timing) Timing {
 	// them rather than having a median invented for them.
 	last := timings[len(timings)-1]
 
+	// Occurrence is the union across samples. A phase required by the URL runs
+	// in every sample, so anything observed once was observed throughout, and
+	// claiming it ran when it never did would be the worse error.
+	var dnsRan, connectRan, tlsRan, firstByteRan bool
+	for _, t := range timings {
+		dnsRan = dnsRan || t.DNSRan
+		connectRan = connectRan || t.ConnectRan
+		tlsRan = tlsRan || t.TLSRan
+		firstByteRan = firstByteRan || t.FirstByteRan
+	}
+
 	return Timing{
-		DNS:        stats.MedianDuration(dns),
-		Connect:    stats.MedianDuration(connect),
-		TLS:        stats.MedianDuration(tlsHandshake),
-		TTFB:       stats.MedianDuration(ttfb),
-		Total:      stats.MedianDuration(total),
-		RemoteIP:   last.RemoteIP,
-		Proto:      last.Proto,
-		TLSVersion: last.TLSVersion,
-		Status:     last.Status,
+		DNS:          stats.MedianDuration(dns),
+		Connect:      stats.MedianDuration(connect),
+		TLS:          stats.MedianDuration(tlsHandshake),
+		TTFB:         stats.MedianDuration(ttfb),
+		Total:        stats.MedianDuration(total),
+		RemoteIP:     last.RemoteIP,
+		Proto:        last.Proto,
+		TLSVersion:   last.TLSVersion,
+		Status:       last.Status,
+		DNSRan:       dnsRan,
+		ConnectRan:   connectRan,
+		TLSRan:       tlsRan,
+		FirstByteRan: firstByteRan,
 	}
 }
 
