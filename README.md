@@ -37,7 +37,7 @@ No admin/root, no pre-installed dependencies beyond the OS.
 | 4 | Measurement: stats, ping/timings, four throughput adapters | ✅ |
 | 5 | Runner, `--phase` / `--compare`, JSON schema | ✅ |
 | 6 | TUI + ASCII fallback | ✅ |
-| 7 | Markdown/JSON reports, `METHODOLOGY.md` | ⬜ |
+| 7 | Markdown/JSON reports, `METHODOLOGY.md` | ✅ |
 | 8 | goreleaser release pipeline, `v0.1.0` | ⬜ |
 
 ## Use
@@ -53,8 +53,14 @@ Measure the ISP path, turn WARP on, measure again, then compare:
 warpbench --quick --phase baseline --out baseline.json
 # turn Cloudflare WARP on
 warpbench --quick --phase warp --out warp.json
-warpbench --compare baseline.json warp.json
+warpbench --compare baseline.json warp.json                 # plain table
+warpbench --compare --report report.md baseline.json warp.json   # Markdown
 ```
+
+The Markdown report is the publishable artefact: metadata, a per-metric table
+and ASCII chart, a list of servers that could not be compared, the caveats that
+stop the numbers being over-read, and the exact command line that produced it.
+`--report -` writes it to stdout instead.
 
 Each phase writes a versioned JSON file holding **every raw sample**, not just
 the summary, so the headline can be recomputed rather than trusted and a later
@@ -77,6 +83,20 @@ to start while WARP is on, and a `warp` run refuses while it is off — because 
 `--force` overrides, and the override is recorded in the result. Comparing two
 files measured against different server-list revisions is likewise refused
 unless forced.
+
+## What the numbers do and do not support
+
+The method is documented in full in [`METHODOLOGY.md`](METHODOLOGY.md). Two
+points are worth stating up front, because they are the ones most easily gotten
+wrong when reading a result:
+
+- **The Cloudflare edge target is not an end-to-end measurement.** With WARP on,
+  that path never leaves Cloudflare's network, so it measures the ISP-to-edge
+  hop. It is footnoted in every report it appears in.
+- **Writing a report is not a licence to publish it.** Every report leads with
+  its own caveats: which targets are best-effort, where ICMP was unavailable and
+  TCP connect time was substituted, which samples were undersized, and how far
+  apart the two phases were.
 
 ## Install
 
@@ -155,6 +175,42 @@ go generate ./...
 ```
 
 A test fails if the copies drift, so forgetting this is caught locally and in CI.
+
+## Reports
+
+A report looks like this (abridged):
+
+```markdown
+# warpbench: raw ISP path vs Cloudflare WARP
+
+| Measured | 2026-09-20T08:00:00+07:00 to 2026-09-20T08:17:00+07:00 |
+| Server list | revision 2026-09-20, source remote |
+
+## Summary
+
+download improved on 2/2 servers (median +684%), upload improved on 1/1
+servers (median +881%), latency changed by a median of -0.1 ms
+
+## Download
+
+| Server | ISP Mbps | WARP Mbps | Δ | Δ% | Verdict |
+|---|---:|---:|---:|---:|---|
+| id-cf-cgk | 41.20 | 118.40 | +77.20 | +187.4% | better |
+
+```text
+id-cf-cgk ISP  ##########.................. 41.2 Mbps
+          WARP ############################ 118.4 Mbps  +187.4%  better
+```
+
+## Caveats
+
+- **Cloudflare edge is not an end-to-end measurement.** ...
+```
+
+The full rendered example lives in
+[`internal/report/testdata/report.md`](internal/report/testdata/report.md), which
+is also the golden file the test suite compares against — so the documented
+format cannot drift from the produced one.
 
 ## Development
 

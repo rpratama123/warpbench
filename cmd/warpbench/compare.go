@@ -3,14 +3,17 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
+	"strings"
 
+	"github.com/rpratama123/warpbench/internal/report"
 	"github.com/rpratama123/warpbench/internal/results"
 )
 
 // runCompare loads two phase files and prints a side-by-side comparison.
 //
 // The Markdown report arrives in Phase 7; this is the plain, pasteable form.
-func runCompare(opts options, stdout, stderr io.Writer) int {
+func runCompare(opts options, args []string, stdout, stderr io.Writer) int {
 	if len(opts.positional) != 2 {
 		writef(stderr, "warpbench: --compare needs exactly two result files\n")
 		return exitUsage
@@ -46,8 +49,53 @@ func runCompare(opts options, stdout, stderr io.Writer) int {
 		return exitError
 	}
 
+	if opts.report != "" {
+		if code := writeReport(opts.report, cmp, args, stdout, stderr); code != exitOK {
+			return code
+		}
+		// A report on stdout replaces the plain table; writing both would
+		// interleave two documents.
+		if opts.report == "-" {
+			return exitOK
+		}
+	}
+
 	printComparison(stdout, cmp)
 	return exitOK
+}
+
+// writeReport renders the Markdown report to a file or to stdout.
+func writeReport(path string, cmp *results.Comparison, args []string, stdout, stderr io.Writer) int {
+	md := report.Markdown(cmp, report.Options{
+		CommandLine: currentCommandLine(args),
+	})
+
+	if path == "-" {
+		if _, err := stdout.Write(md); err != nil {
+			writef(stderr, "warpbench: %v\n", err)
+			return exitError
+		}
+		return exitOK
+	}
+
+	if err := os.WriteFile(path, md, 0o644); err != nil {
+		writef(stderr, "warpbench: %v\n", err)
+		return exitError
+	}
+	writef(stderr, "wrote %s\n", path)
+	return exitOK
+}
+
+// currentCommandLine reconstructs the invocation for the reproduce block, so a
+// reader can repeat the run verbatim.
+//
+// The arguments are passed in rather than read from os.Args, so the block
+// records what this process was actually asked to do.
+func currentCommandLine(args []string) string {
+	if len(args) == 0 {
+		return "warpbench"
+	}
+	return "warpbench " + strings.Join(args, " ")
 }
 
 func printComparison(w io.Writer, c *results.Comparison) {

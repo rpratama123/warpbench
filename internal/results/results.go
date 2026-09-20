@@ -102,18 +102,21 @@ type Trace struct {
 
 // Server is one measured target.
 type Server struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Group      string   `json:"group"`
-	Protocol   string   `json:"protocol"`
-	Provider   string   `json:"provider"`
-	City       string   `json:"city"`
-	Country    string   `json:"country"`
-	ResolvedIP string   `json:"resolved_ip"`
-	Ping       *Ping    `json:"ping"`
-	Timings    *Timings `json:"timings"`
-	Download   *Series  `json:"download"`
-	Upload     *Series  `json:"upload"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Group      string `json:"group"`
+	Protocol   string `json:"protocol"`
+	Provider   string `json:"provider"`
+	City       string `json:"city"`
+	Country    string `json:"country"`
+	ResolvedIP string `json:"resolved_ip"`
+	// Flags are copied from the server list, so the report can explain a target
+	// rather than inferring its nature from its id.
+	Flags    []string `json:"flags,omitempty"`
+	Ping     *Ping    `json:"ping"`
+	Timings  *Timings `json:"timings"`
+	Download *Series  `json:"download"`
+	Upload   *Series  `json:"upload"`
 	// Warnings carries per-server problems: an unusable entry, an ICMP
 	// substitution, a skipped metric.
 	Warnings []string `json:"warnings"`

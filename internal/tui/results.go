@@ -18,26 +18,28 @@ type metricSpec struct {
 	get    func(results.ServerDelta) *results.Delta
 }
 
-// metricPages is the order the results are paged in: throughput first, because
-// that is the question most people are asking.
+// metricPages derives the paged metrics from the canonical set, so the
+// interactive view and the Markdown report always cover the same measurements.
 func metricPages() []metricSpec {
 	oneDecimal := func(v float64) string { return fmt.Sprintf("%.1f", v) }
 	twoDecimals := func(v float64) string { return fmt.Sprintf("%.2f", v) }
 
-	return []metricSpec{
-		{name: "download", unit: " Mbps", format: oneDecimal,
-			get: func(s results.ServerDelta) *results.Delta { return s.Download }},
-		{name: "upload", unit: " Mbps", format: oneDecimal,
-			get: func(s results.ServerDelta) *results.Delta { return s.Upload }},
-		{name: "latency (avg)", unit: " ms", format: oneDecimal,
-			get: func(s results.ServerDelta) *results.Delta { return s.Latency }},
-		{name: "jitter", unit: " ms", format: oneDecimal,
-			get: func(s results.ServerDelta) *results.Delta { return s.Jitter }},
-		{name: "loss", unit: " %", format: twoDecimals,
-			get: func(s results.ServerDelta) *results.Delta { return s.Loss }},
-		{name: "ttfb", unit: " ms", format: oneDecimal,
-			get: func(s results.ServerDelta) *results.Delta { return s.TTFB }},
+	out := make([]metricSpec, 0, len(results.Metrics()))
+	for _, m := range results.Metrics() {
+		format := oneDecimal
+		if m.Key == "loss" {
+			// Loss is a small percentage where a tenth is a meaningful
+			// difference, so it gets the extra digit.
+			format = twoDecimals
+		}
+		out = append(out, metricSpec{
+			name:   strings.ToLower(m.Title),
+			unit:   m.Unit,
+			format: format,
+			get:    m.Get,
+		})
 	}
+	return out
 }
 
 // ResultsModel shows the side-by-side comparison.

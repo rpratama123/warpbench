@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -385,5 +386,84 @@ func TestWantsTUI(t *testing.T) {
 				t.Errorf("wantsTUI() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// --- markdown report -------------------------------------------------------
+
+func TestReportWritesAMarkdownFile(t *testing.T) {
+	baseline, warp := writePair(t)
+	out := filepath.Join(t.TempDir(), "report.md")
+
+	code, stdout, stderr := runCapture(t, []string{"--compare", "--report", out, baseline, warp}, neverTTY)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr: %s)", code, exitOK, stderr)
+	}
+	if !strings.Contains(stderr, "wrote") {
+		t.Errorf("stderr = %q, want it to name the file written", stderr)
+	}
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("the report was not written: %v", err)
+	}
+	body := string(data)
+
+	for _, want := range []string{
+		"# warpbench",
+		"## Summary",
+		"## Phases",
+		"## Download",
+		"## Caveats",
+		"## Reproduce",
+		// The reproduce block must carry the actual invocation.
+		"--compare",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("report is missing %q", want)
+		}
+	}
+
+	// The plain table still prints, because the report went to a file.
+	if !strings.Contains(stdout, "warpbench comparison") {
+		t.Error("writing a report to a file should not suppress the comparison table")
+	}
+}
+
+// Writing the report to stdout replaces the table: interleaving two documents
+// would produce something neither readable nor pasteable.
+func TestReportToStdoutReplacesTheTable(t *testing.T) {
+	baseline, warp := writePair(t)
+
+	code, stdout, stderr := runCapture(t, []string{"--compare", "--report", "-", baseline, warp}, neverTTY)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr: %s)", code, exitOK, stderr)
+	}
+	if !strings.HasPrefix(stdout, "# warpbench") {
+		t.Errorf("stdout should be the report:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "warpbench comparison\n") {
+		t.Error("the plain table was interleaved with the Markdown")
+	}
+}
+
+func TestReportWriteFailureIsReported(t *testing.T) {
+	baseline, warp := writePair(t)
+	// A directory cannot be opened as a file.
+	code, _, stderr := runCapture(t, []string{"--compare", "--report", t.TempDir(), baseline, warp}, neverTTY)
+
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "warpbench:") {
+		t.Errorf("stderr = %q, want a diagnostic", stderr)
+	}
+}
+
+func TestReportFlagAppearsInUsage(t *testing.T) {
+	_, stdout, _ := runCapture(t, []string{"--help"}, neverTTY)
+
+	if !strings.Contains(stdout, "--report") {
+		t.Error("usage does not document --report")
 	}
 }

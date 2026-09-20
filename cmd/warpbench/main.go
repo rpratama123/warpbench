@@ -49,6 +49,7 @@ type options struct {
 	groups   string
 	phase    string
 	out      string
+	report   string
 	compare  bool
 	force    bool
 	parallel int
@@ -106,9 +107,9 @@ func run(args []string, stdout, stderr io.Writer, isTTY func() bool) int {
 	case opts.doctor:
 		return doctor(stdout, opts, isTTY)
 	case opts.compare:
-		return runCompare(opts, stdout, stderr)
+		return runCompare(opts, args, stdout, stderr)
 	default:
-		return runPhase(opts, stdout, stderr, isTTY)
+		return runPhase(opts, args, stdout, stderr, isTTY)
 	}
 }
 
@@ -133,6 +134,7 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&opts.phase, "phase", "", "phase to measure: baseline or warp")
 	fs.StringVar(&opts.out, "out", "", "write the result JSON to `path`")
 	fs.BoolVar(&opts.compare, "compare", false, "compare two result files given as arguments")
+	fs.StringVar(&opts.report, "report", "", "write a Markdown report to `path`, or - for stdout")
 	fs.BoolVar(&opts.force, "force", false, "proceed despite a WARP-state or server-list-revision mismatch")
 	fs.IntVar(&opts.parallel, "parallel", 1, "concurrent streams for throughput samples")
 	fs.BoolVar(&opts.ipv6, "ipv6", false, "measure over IPv6 instead of IPv4")
@@ -188,6 +190,7 @@ Flags:
   --phase PHASE      baseline or warp (required to measure)
   --out PATH         write the result JSON to PATH
   --compare          compare two result files given as arguments
+  --report PATH      write a Markdown report to PATH, or - for stdout
   --force            proceed despite a state or revision mismatch
   --parallel N       concurrent streams for throughput samples (default 1)
   --ipv6             measure over IPv6 instead of IPv4
@@ -207,6 +210,7 @@ Typical use:
   # turn WARP on
   warpbench --quick --phase warp --out warp.json
   warpbench --compare baseline.json warp.json
+  warpbench --compare --report report.md baseline.json warp.json
 
 Plan and progress:
   ` + repoURL + `
@@ -287,9 +291,9 @@ func checkWritable(dir string) error {
 
 // --- the measure path ------------------------------------------------------
 
-func runPhase(opts options, stdout, stderr io.Writer, isTTY func() bool) int {
+func runPhase(opts options, args []string, stdout, stderr io.Writer, isTTY func() bool) int {
 	if wantsTUI(opts, isTTY) {
-		return runTUI(opts, stderr)
+		return runTUI(opts, args, stderr)
 	}
 
 	phase := strings.ToLower(strings.TrimSpace(opts.phase))

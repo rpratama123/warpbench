@@ -52,8 +52,10 @@ type AppConfig struct {
 	// CheckTrace returns a command that polls the WARP state for the pause
 	// screen.
 	CheckTrace func() tea.Cmd
-	// Save persists both phases and returns the paths written.
-	Save func(baseline, warp *results.File) ([]string, error)
+	// Save persists the run and returns the paths written. It receives the
+	// comparison rather than the two files so the caller can write the report
+	// and the raw results together.
+	Save func(cmp *results.Comparison) ([]string, error)
 	// Groups limits the flow to the named groups, mirroring --groups.
 	Groups []string
 	// CompareOptions configures the comparison, chiefly the revision override.
@@ -75,6 +77,7 @@ type AppModel struct {
 
 	baseline *results.File
 	warp     *results.File
+	cmp      *results.Comparison
 	saved    []string
 
 	// err is a failure that ends the run, as opposed to a per-server warning.
@@ -106,6 +109,9 @@ func (m AppModel) State() screen { return m.state }
 
 // SavedPaths returns the files written, once the run has finished.
 func (m AppModel) SavedPaths() []string { return m.saved }
+
+// Comparison returns the comparison, once the run has finished.
+func (m AppModel) Comparison() *results.Comparison { return m.cmp }
 
 // Err returns the failure that ended the run, if any.
 func (m AppModel) Err() error { return m.err }
@@ -222,6 +228,7 @@ func (m *AppModel) finishComparison() tea.Cmd {
 		return tea.Quit
 	}
 
+	m.cmp = cmp
 	m.results = NewResultsModel(cmp, m.cfg.Theme)
 	m.results, _ = m.results.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	m.state = screenResults
@@ -285,7 +292,7 @@ func (m *AppModel) saveNow() tea.Cmd {
 		return tea.Quit
 	}
 
-	paths, err := m.cfg.Save(m.baseline, m.warp)
+	paths, err := m.cfg.Save(m.cmp)
 	if err != nil {
 		m.err = err
 	}

@@ -462,3 +462,40 @@ func joinSentences(parts []string) string {
 
 // Round1 rounds to one decimal place, for stable rendering.
 func Round1(v float64) float64 { return math.Round(v*10) / 10 }
+
+// Metric describes one comparable measurement.
+//
+// The TUI and the Markdown report both render from this list, so a metric
+// cannot appear in one and be quietly missing from the other, and the two
+// cannot disagree about which direction is better.
+type Metric struct {
+	// Key is the delta's Metric field.
+	Key string
+	// Title is the human name, e.g. "Download".
+	Title string
+	// Unit is appended to values, e.g. " Mbps".
+	Unit string
+	// Direction says which way is an improvement.
+	Direction Direction
+	// Get extracts the delta from a server comparison.
+	Get func(ServerDelta) *Delta
+}
+
+// Metrics returns the comparable metrics in report order: throughput first,
+// because that is the question most readers are asking.
+func Metrics() []Metric {
+	return []Metric{
+		{Key: "download", Title: "Download", Unit: " Mbps", Direction: HigherIsBetter,
+			Get: func(s ServerDelta) *Delta { return s.Download }},
+		{Key: "upload", Title: "Upload", Unit: " Mbps", Direction: HigherIsBetter,
+			Get: func(s ServerDelta) *Delta { return s.Upload }},
+		{Key: "latency_avg", Title: "Latency (average)", Unit: " ms", Direction: LowerIsBetter,
+			Get: func(s ServerDelta) *Delta { return s.Latency }},
+		{Key: "jitter", Title: "Jitter", Unit: " ms", Direction: LowerIsBetter,
+			Get: func(s ServerDelta) *Delta { return s.Jitter }},
+		{Key: "loss", Title: "Packet loss", Unit: " %", Direction: LowerIsBetter,
+			Get: func(s ServerDelta) *Delta { return s.Loss }},
+		{Key: "ttfb", Title: "Time to first byte", Unit: " ms", Direction: LowerIsBetter,
+			Get: func(s ServerDelta) *Delta { return s.TTFB }},
+	}
+}

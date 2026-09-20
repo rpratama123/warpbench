@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"runtime"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 
 	"github.com/rpratama123/warpbench/internal/config"
 	"github.com/rpratama123/warpbench/internal/iperf3"
+	"github.com/rpratama123/warpbench/internal/report"
 	"github.com/rpratama123/warpbench/internal/results"
 	"github.com/rpratama123/warpbench/internal/runner"
 	"github.com/rpratama123/warpbench/internal/serverlist"
@@ -24,7 +27,7 @@ import (
 //
 // It wires the same runner, the same result format and the same trace endpoint
 // the plain path uses; only the presentation differs.
-func runTUI(opts options, stderr io.Writer) int {
+func runTUI(opts options, args []string, stderr io.Writer) int {
 	ctx := context.Background()
 
 	cacheDir, err := config.EnsureCacheDir()
@@ -99,15 +102,21 @@ func runTUI(opts options, stderr io.Writer) int {
 			}
 		},
 
-		Save: func(baseline, warp *results.File) ([]string, error) {
+		Save: func(cmp *results.Comparison) ([]string, error) {
 			paths := []string{
-				defaultOutPath("baseline", baseline.StartedAt),
-				defaultOutPath("warp", warp.StartedAt),
+				defaultOutPath("baseline", cmp.Baseline.StartedAt),
+				defaultOutPath("warp", cmp.Warp.StartedAt),
+				defaultReportPath(cmp.Warp.StartedAt),
 			}
-			if err := results.Write(paths[0], baseline); err != nil {
+			if err := results.Write(paths[0], cmp.Baseline); err != nil {
 				return nil, err
 			}
-			if err := results.Write(paths[1], warp); err != nil {
+			if err := results.Write(paths[1], cmp.Warp); err != nil {
+				return nil, err
+			}
+
+			md := report.Markdown(cmp, report.Options{CommandLine: currentCommandLine(args)})
+			if err := os.WriteFile(paths[2], md, 0o644); err != nil {
 				return nil, err
 			}
 			return paths, nil
@@ -146,6 +155,11 @@ func runTUI(opts options, stderr io.Writer) int {
 		writef(stderr, "compare them with:\n  warpbench --compare %s %s\n", m.SavedPaths()[0], m.SavedPaths()[1])
 	}
 	return exitOK
+}
+
+// defaultReportPath names the Markdown report written alongside the results.
+func defaultReportPath(at time.Time) string {
+	return fmt.Sprintf("warpbench-%s-report.md", at.Format("20060102-1504"))
 }
 
 // newAssetClient returns the client used to fetch release assets.

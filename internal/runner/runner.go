@@ -273,6 +273,7 @@ func measureServer(ctx context.Context, cfg Config, deps Deps, s serverlist.Serv
 		Provider: s.Provider,
 		City:     s.City,
 		Country:  s.Country,
+		Flags:    s.Flags,
 		Warnings: []string{},
 	}
 

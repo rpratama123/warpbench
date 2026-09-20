@@ -56,7 +56,7 @@ func warpState(phase string) string {
 type appFixture struct {
 	app      AppModel
 	ran      []string
-	saved    []*results.File
+	saved    []*results.Comparison
 	saveErr  error
 	runErr   error
 	checkCmd func() tea.Cmd
@@ -83,12 +83,12 @@ func newAppFixture(t *testing.T, opts ...func(*AppConfig)) *appFixture {
 			return fakePhase(phase, 100), nil
 		},
 		CheckTrace: f.checkCmd,
-		Save: func(baseline, warp *results.File) ([]string, error) {
+		Save: func(cmp *results.Comparison) ([]string, error) {
 			if f.saveErr != nil {
 				return nil, f.saveErr
 			}
-			f.saved = append(f.saved, baseline, warp)
-			return []string{"baseline.json", "warp.json"}, nil
+			f.saved = append(f.saved, cmp)
+			return []string{"baseline.json", "warp.json", "report.md"}, nil
 		},
 	}
 	for _, opt := range opts {
@@ -239,13 +239,13 @@ func TestAppReachesResultsAndSaves(t *testing.T) {
 	if f.app.State() != screenDone {
 		t.Errorf("state = %v, want done", f.app.State())
 	}
-	if len(f.saved) != 2 {
-		t.Errorf("saved %d files, want both phases", len(f.saved))
+	if len(f.saved) != 1 {
+		t.Errorf("Save was called %d times, want once with the comparison", len(f.saved))
 	}
-	if got := f.app.SavedPaths(); len(got) != 2 {
-		t.Errorf("SavedPaths() = %v", got)
+	if got := f.app.SavedPaths(); len(got) != 3 {
+		t.Errorf("SavedPaths() = %v, want results plus the report", got)
 	}
-	if !strings.Contains(f.app.View(), "baseline.json") {
+	if !strings.Contains(f.app.View(), "report.md") {
 		t.Errorf("the saved paths should be shown: %q", f.app.View())
 	}
 }
@@ -281,8 +281,8 @@ func TestAppAutoConfirmSkipsThePrompt(t *testing.T) {
 	if f.app.State() == screenSave {
 		t.Fatal("the save prompt appeared despite AutoConfirm")
 	}
-	if len(f.saved) != 2 {
-		t.Errorf("saved %d files, want both phases", len(f.saved))
+	if len(f.saved) != 1 {
+		t.Errorf("Save was called %d times, want once", len(f.saved))
 	}
 }
 
@@ -333,7 +333,7 @@ func TestAppReportsAnUncomparablePair(t *testing.T) {
 
 func TestAppReportsASaveFailure(t *testing.T) {
 	f := newAppFixture(t, func(cfg *AppConfig) {
-		cfg.Save = func(*results.File, *results.File) ([]string, error) {
+		cfg.Save = func(*results.Comparison) ([]string, error) {
 			return nil, errors.New("disk full")
 		}
 	})

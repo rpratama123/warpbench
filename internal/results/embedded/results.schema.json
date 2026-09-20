@@ -154,6 +154,13 @@
         "city": { "type": "string" },
         "country": { "type": "string" },
         "resolved_ip": { "type": "string" },
+        "flags": {
+          "description": "Copied from the server list so the report can explain a target rather than infer.",
+          "type": "array",
+          "items": {
+            "enum": ["footnote:cloudflare-edge", "control:domestic", "best-effort"]
+          }
+        },
         "ping": {
           "description": "null when the metric was not measured, which is different from a measured zero.",
           "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/ping" }]
