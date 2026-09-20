@@ -15,6 +15,16 @@ import (
 	"time"
 )
 
+// coarseClock reports whether this platform's monotonic clock is too coarse to
+// resolve a loopback setup phase.
+//
+// Windows measured a real connect as exactly 0ms in CI, then a real first byte
+// as 0ms on the next run, while the occurrence flags fired correctly both times.
+// Which phase rounds to zero is not deterministic, so only the occurrence flags
+// are asserted portably and the duration assertions are limited to platforms
+// whose clock can actually resolve them.
+const coarseClock = runtime.GOOS == "windows"
+
 // stubICMP replaces the ICMP probe for the duration of a test.
 func stubICMP(t *testing.T, fn func(context.Context, string, PingOptions) (*PingResult, error)) {
 	t.Helper()
@@ -257,14 +267,19 @@ func TestTimingsMeasureSetupPhases(t *testing.T) {
 	if !got.FirstByteRan {
 		t.Error("FirstByteRan = false, the first-byte trace did not fire")
 	}
-	if runtime.GOOS != "windows" && got.Connect <= 0 {
-		t.Error("Connect = 0, want a measured TCP connect")
-	}
-	if got.TTFB <= 0 {
-		t.Error("TTFB = 0, want a measured first byte")
+	if !coarseClock {
+		if got.Connect <= 0 {
+			t.Error("Connect = 0, want a measured TCP connect")
+		}
+		if got.TTFB <= 0 {
+			t.Error("TTFB = 0, want a measured first byte")
+		}
 	}
 	if got.Total < got.Connect {
 		t.Errorf("Total %v < Connect %v", got.Total, got.Connect)
+	}
+	if got.Total <= 0 {
+		t.Error("Total = 0, want a measurable request duration")
 	}
 	if got.RemoteIP == "" {
 		t.Error("RemoteIP is empty; the resolved address must be recorded")
@@ -302,7 +317,7 @@ func TestTimingsCaptureTLSHandshake(t *testing.T) {
 	if !got.TLSRan {
 		t.Error("TLSRan = false, want the handshake trace to have fired")
 	}
-	if got.TLS <= 0 {
+	if !coarseClock && got.TLS <= 0 {
 		t.Error("TLS = 0, want a measured handshake")
 	}
 	if !strings.HasPrefix(got.TLSVersion, "TLS1.") {
@@ -572,6 +587,14 @@ func TestIntegrationTimingsRealHost(t *testing.T) {
 		median.DNS, median.Connect, median.TLS, median.TTFB, median.Total,
 		median.RemoteIP, median.Proto, median.TLSVersion)
 
+	if !median.ConnectRan {
+		t.Error("ConnectRan = false against a real host")
+	}
+	if !median.TLSRan {
+		t.Error("TLSRan = false against an HTTPS host")
+	}
+	// A remote connect and handshake are tens of milliseconds, far above any
+	// plausible clock granularity, so these hold on every platform.
 	if median.Connect <= 0 {
 		t.Error("Connect = 0 against a real host")
 	}
