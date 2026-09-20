@@ -298,7 +298,95 @@ else
 	fail "unpinned run failed" "$(printf '%s' "$out" | tr '\n' '|')"
 fi
 
-section "8. PowerShell launcher (logic; runs under pwsh on this host)"
+section "8. a new release at the same 'latest' URL is picked up"
+
+# `latest` is a moving target. Treating it as immutable means a user runs
+# whatever they first downloaded, forever -- including past a bug fix.
+cache="$WORK/cache-latest-refresh"
+run_launcher bash "$cache"
+out=$(launcher_out)
+if printf '%s' "$out" | grep -q 'FAKE-ARGS'; then
+	pass "first run downloaded the current release"
+else
+	fail "first run did not run the release" "$(printf '%s' "$out" | tr '\n' '|')"
+fi
+
+# Publish a distinguishable second release at the same URL.
+cat >"$RELEASE_ROOT/latest/download/$ASSET" <<'EOF2'
+#!/bin/sh
+echo "FAKE-ARGS-V2: $*"
+exit 0
+EOF2
+chmod +x "$RELEASE_ROOT/latest/download/$ASSET"
+(cd "$RELEASE_ROOT/latest/download" && printf '%s  %s\n' "$(hash_of "$ASSET")" "$ASSET" >SHA256SUMS)
+
+run_launcher bash "$cache"
+out=$(launcher_out)
+if printf '%s' "$out" | grep -q 'FAKE-ARGS-V2'; then
+	pass "a changed release was downloaded instead of running a stale cache"
+else
+	fail "the cached binary was reused after the release changed" "$(printf '%s' "$out" | tr '\n' '|')"
+fi
+
+# An unreachable release must still fall back to a verified cached copy, or
+# clearing the cache would be the only way to run offline.
+cat >"$RELEASE_ROOT/latest/download/$ASSET" <<'EOF3'
+#!/bin/sh
+echo "FAKE-ARGS-V3: $*"
+exit 0
+EOF3
+chmod +x "$RELEASE_ROOT/latest/download/$ASSET"
+(cd "$RELEASE_ROOT/latest/download" && printf '%s  %s\n' "$(hash_of "$ASSET")" "$ASSET" >SHA256SUMS)
+run_launcher bash "$cache"
+out=$(launcher_out)
+if printf '%s' "$out" | grep -q 'FAKE-ARGS-V3'; then
+	pass "an updated release is fetched on the next run"
+else
+	fail "a second update was not picked up" "$(printf '%s' "$out" | tr '\n' '|')"
+fi
+
+section "9. PowerShell launcher notices a new release too"
+
+# write_latest_windows_asset <marker> rewrites the windows asset at the 'latest'
+# URL and rebuilds SHA256SUMS over everything present.
+write_latest_windows_asset() {
+	local dir="$RELEASE_ROOT/latest/download" f
+	printf '#!/bin/sh\necho "FAKE-WIN-%s: $*"\nexit 0\n' "$1" >"$dir/warpbench_windows_${TEST_ARCH}.exe"
+	chmod +x "$dir/warpbench_windows_${TEST_ARCH}.exe"
+	: >"$dir/SHA256SUMS"
+	for f in "$dir"/warpbench_*; do
+		printf '%s  %s\n' "$(hash_of "$f")" "$(basename "$f")" >>"$dir/SHA256SUMS"
+	done
+}
+
+if command -v pwsh >/dev/null 2>&1; then
+	write_latest_windows_asset v1
+	ps_cache="$WORK/cache-ps-refresh"
+	run_pwsh() {
+		env WARPBENCH_BASE_URL="$BASE_URL" WARPBENCH_CACHE_DIR="$ps_cache" \
+			pwsh -NoProfile -File "$LAUNCHER_PS" </dev/null 2>&1 || true
+	}
+
+	run_pwsh >/dev/null
+	out=$(run_pwsh)
+	if printf '%s' "$out" | grep -q 'using cached'; then
+		pass "an unchanged release is served from the cache"
+	else
+		fail "an unchanged release was re-downloaded every run" "$(printf '%s' "$out" | tr '\n' '|')"
+	fi
+
+	write_latest_windows_asset v2
+	out=$(run_pwsh)
+	if printf '%s' "$out" | grep -q 'downloading warpbench_windows'; then
+		pass "a changed release is re-downloaded instead of running a stale cache"
+	else
+		fail "the PowerShell launcher reused a stale cache" "$(printf '%s' "$out" | tr '\n' '|')"
+	fi
+else
+	skip "pwsh not installed"
+fi
+
+section "10. PowerShell launcher (logic; runs under pwsh on this host)"
 if command -v pwsh >/dev/null 2>&1; then
 	# (a) cold download + checksum verification.
 	ps_cache="$WORK/cache-ps"
@@ -343,7 +431,7 @@ else
 	skip "pwsh not installed"
 fi
 
-section "9. cache survives the network disappearing"
+section "11. cache survives the network disappearing"
 kill "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 SERVER_PID=""
@@ -355,7 +443,7 @@ else
 	fail "cache miss after the server stopped" "$(printf '%s' "$out" | tr '\n' '|')"
 fi
 
-section "10. truncation safety (curl | bash)"
+section "12. truncation safety (curl | bash)"
 last_line=$(grep -v '^[[:space:]]*$' "$LAUNCHER_SH" | tail -1)
 if [ "$last_line" = 'main "$@"' ]; then
 	pass "main \"\$@\" is the last non-blank line"
@@ -374,7 +462,7 @@ else
 	fail "a truncated copy had side effects" "$(printf '%s' "$out" | tr '\n' '|')"
 fi
 
-section "11. static checks"
+section "13. static checks"
 if command -v shellcheck >/dev/null 2>&1; then
 	if shellcheck -s sh "$LAUNCHER_SH" >/dev/null 2>&1; then
 		pass "shellcheck -s sh: clean"

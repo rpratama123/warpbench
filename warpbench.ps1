@@ -112,6 +112,22 @@ function Get-RemoteFile {
     Invoke-WebRequest @params
 }
 
+# Test-CachedBinary reports whether a cached binary still matches the checksums.
+#
+# Silent by design: a mismatch here is not an error, it means the release has
+# moved on and there is something newer to fetch.
+function Test-CachedBinary {
+    param(
+        [Parameter(Mandatory = $true)][string] $Path,
+        [Parameter(Mandatory = $true)][string] $SumsPath,
+        [Parameter(Mandatory = $true)][string] $Asset
+    )
+
+    $want = Get-ExpectedHash -SumsPath $SumsPath -Asset $Asset
+    if (-not $want) { return $false }
+    return (Get-FileDigest -Path $Path) -eq $want
+}
+
 # Returns the expected lowercase hex digest for $Asset, or $null if absent.
 function Get-ExpectedHash {
     param(
@@ -169,28 +185,51 @@ function Invoke-Warpbench {
 
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
 
+    # Decide whether the cached copy is still current.
+    #
+    # A pinned tag is immutable, so a copy whose checksum matches is final.
+    # `latest` moves with every release, so its checksum file is re-read on every
+    # run -- a few hundred bytes -- and the binary fetched again when the release
+    # has changed. Treating `latest` as immutable means a user runs whatever they
+    # first downloaded, forever, including past a bug fix.
     $cached = $false
+    $sumsFresh = $false
+    $sumsPart = "$sums.part"
+
     if ((Test-Path -LiteralPath $binary) -and (Test-Path -LiteralPath $sums)) {
-        $want = Get-ExpectedHash -SumsPath $sums -Asset $asset
-        if ($want -and ((Get-FileDigest -Path $binary) -eq $want)) {
-            $cached = $true
-            Write-Message "using cached $binary"
+        if ($tag -eq 'latest') {
+            try {
+                Get-RemoteFile -Uri "$urlBase/SHA256SUMS" -Destination $sumsPart
+                Move-Item -Force -LiteralPath $sumsPart -Destination $sums
+                $sumsFresh = $true
+            }
+            catch {
+                # Offline: a cached copy that still matches its own recorded
+                # checksum beats refusing to run.
+                Write-Message 'could not reach the release; using the cached copy'
+            }
         }
+        $cached = Test-CachedBinary -Path $binary -SumsPath $sums -Asset $asset
+    }
+
+    if ($cached) {
+        Write-Message "using cached $binary"
     }
 
     if (-not $cached) {
         Write-Message "platform:   $asset"
         Write-Message "release:    $urlBase"
 
-        Write-Message 'downloading SHA256SUMS'
-        $sumsPart = "$sums.part"
-        try {
-            Get-RemoteFile -Uri "$urlBase/SHA256SUMS" -Destination $sumsPart
+        if (-not $sumsFresh) {
+            Write-Message 'downloading SHA256SUMS'
+            try {
+                Get-RemoteFile -Uri "$urlBase/SHA256SUMS" -Destination $sumsPart
+            }
+            catch {
+                Write-Fatal "no release found at $urlBase (has a release been published yet?)"
+            }
+            Move-Item -Force -LiteralPath $sumsPart -Destination $sums
         }
-        catch {
-            Write-Fatal "no release found at $urlBase (has a release been published yet?)"
-        }
-        Move-Item -Force -LiteralPath $sumsPart -Destination $sums
 
         Write-Message "downloading $asset"
         $binaryPart = "$binary.part"

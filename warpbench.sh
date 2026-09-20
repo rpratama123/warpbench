@@ -93,9 +93,26 @@ sha256_of() {
 	fi
 }
 
-# verify <binary> <sha256sums-file> -> 0 if the binary matches
+# expected_hash <sha256sums-file> -> prints the digest recorded for ASSET
+expected_hash() {
+	awk -v a="$ASSET" '$2 == a { print $1; exit }' "$1"
+}
+
+# matches <binary> <sha256sums-file> -> 0 when the binary matches, silently
+#
+# Silent because it also answers "is the cached copy still the current
+# release?", where a mismatch is not an error -- it just means there is
+# something newer to fetch.
+matches() {
+	want=$(expected_hash "$2")
+	[ -n "$want" ] || return 1
+	[ "$(sha256_of "$1")" = "$want" ]
+}
+
+# verify <binary> <sha256sums-file> -> 0 if the binary matches, explaining
+# itself when it does not. Used after a download, where a mismatch is fatal.
 verify() {
-	want=$(awk -v a="$ASSET" '$2 == a { print $1; exit }' "$2")
+	want=$(expected_hash "$2")
 	if [ -z "$want" ]; then
 		log "no checksum entry for $ASSET in SHA256SUMS; refusing to run it"
 		return 1
@@ -131,15 +148,45 @@ main() {
 	mkdir -p "$dest_dir" || die "could not create cache directory $dest_dir"
 	chmod 700 "$cache_dir" "$dest_dir" 2>/dev/null || true
 
-	if [ -f "$sums" ] && [ -f "$binary" ] && verify "$binary" "$sums"; then
+	# Decide whether the cached copy is still current.
+	#
+	# A pinned tag is immutable, so a copy whose checksum matches is final.
+	# `latest` moves with every release, so its checksum file has to be re-read
+	# on every run -- a few hundred bytes -- and the binary fetched again when
+	# the release has changed. Treating `latest` as immutable means a user runs
+	# whatever they first downloaded, forever, including past a bug fix.
+	use_cache=0
+	sums_fresh=0
+
+	if [ -f "$binary" ] && [ -f "$sums" ]; then
+		if [ "$tag" = latest ]; then
+			if download "$url_base/SHA256SUMS" "$sums.part" 2>/dev/null; then
+				mv "$sums.part" "$sums"
+				sums_fresh=1
+				matches "$binary" "$sums" && use_cache=1
+			else
+				# Offline. A cached copy that still matches its own recorded
+				# checksum is better than refusing to run.
+				log "could not reach the release; using the cached copy"
+				matches "$binary" "$sums" && use_cache=1
+			fi
+		elif matches "$binary" "$sums"; then
+			use_cache=1
+		fi
+	fi
+
+	if [ "$use_cache" -eq 1 ]; then
 		log "using cached $binary"
 	else
 		log "platform:   $ASSET"
 		log "release:    $url_base"
-		log "downloading SHA256SUMS"
-		download "$url_base/SHA256SUMS" "$sums.part" ||
-			die "no release found at $url_base (has a release been published yet?)"
-		mv "$sums.part" "$sums"
+
+		if [ "$sums_fresh" -eq 0 ]; then
+			log "downloading SHA256SUMS"
+			download "$url_base/SHA256SUMS" "$sums.part" ||
+				die "no release found at $url_base (has a release been published yet?)"
+			mv "$sums.part" "$sums"
+		fi
 
 		log "downloading $ASSET"
 		download "$url_base/$ASSET" "$binary.part" || die "download failed: $url_base/$ASSET"

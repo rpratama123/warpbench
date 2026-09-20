@@ -126,6 +126,12 @@ Both forms are stable: they are served from `main`, not from a release tag, and
 the launcher resolves the binary version itself, so they keep working across
 every future release.
 
+Running the same command again picks up a new release by itself: the launcher
+re-reads the release's checksum file (a few hundred bytes) and re-downloads only
+when it has changed. A pinned `WARPBENCH_VERSION` is treated as immutable, since
+a tag is. If the release cannot be reached, a cached copy that still matches its
+recorded checksum is used, so the tool works offline.
+
 The launcher does four things and nothing else: detect the platform, download
 the matching binary and `SHA256SUMS` into a per-user cache, verify the checksum,
 and execute it. No `sudo`, nothing written outside the cache, and it refuses to
