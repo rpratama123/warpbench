@@ -35,10 +35,43 @@ No admin/root, no pre-installed dependencies beyond the OS.
 | 2 | Repo scaffold, `go.mod`, launchers, CI | ✅ |
 | 3 | Server list: schema, loader, cache, `servers.json` v1 | ✅ |
 | 4 | Measurement: stats, ping/timings, four throughput adapters | ✅ |
-| 5 | Runner, `--phase` / `--compare`, JSON schema | ⬜ |
+| 5 | Runner, `--phase` / `--compare`, JSON schema | ✅ |
 | 6 | TUI + ASCII fallback | ⬜ |
 | 7 | Markdown/JSON reports, `METHODOLOGY.md` | ⬜ |
 | 8 | goreleaser release pipeline, `v0.1.0` | ⬜ |
+
+## Use
+
+Measure the ISP path, turn WARP on, measure again, then compare:
+
+```sh
+warpbench --quick --phase baseline --out baseline.json
+# turn Cloudflare WARP on
+warpbench --quick --phase warp --out warp.json
+warpbench --compare baseline.json warp.json
+```
+
+Each phase writes a versioned JSON file holding **every raw sample**, not just
+the summary, so the headline can be recomputed rather than trusted and a later
+version can re-render without re-measuring. The public IP is masked by default;
+`--no-mask` disables that.
+
+`--quick` measures 10 servers (2 per group, one download-led and one
+upload-led) in about 8 minutes for both phases. `--extended` measures the whole
+list, which is roughly 75 minutes for both phases, so it is worth narrowing with
+`--groups`. Both figures are computed from your actual selection and printed
+before the run starts:
+
+```sh
+warpbench --extended --groups id,sg --phase baseline --out baseline.json
+```
+
+Two safety checks make the comparison mean something. A `baseline` run refuses
+to start while WARP is on, and a `warp` run refuses while it is off — because a
+"baseline" measured through WARP looks perfectly fine and means nothing.
+`--force` overrides, and the override is recorded in the result. Comparing two
+files measured against different server-list revisions is likewise refused
+unless forced.
 
 ## Install
 

@@ -48,6 +48,11 @@ const maxAssetBytes = 64 << 20
 
 // Doer is the subset of http.Client this package needs, so tests can serve
 // assets locally.
+//
+// The Doer MUST follow redirects: GitHub serves release assets through a
+// redirect to objects.githubusercontent.com. The measurement HTTP client
+// deliberately does not follow redirects -- so that a throughput sample cannot
+// silently change host -- which makes it the wrong client to pass here.
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
@@ -186,6 +191,12 @@ func fetch(ctx context.Context, doer Doer, url string) (io.ReadCloser, error) {
 	resp, err := doer.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("downloading %s: %w", url, err)
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf(
+			"downloading %s: got %s, which usually means the HTTP client does not follow redirects; "+
+				"release assets are served through one", url, resp.Status)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()

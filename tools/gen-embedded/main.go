@@ -18,6 +18,7 @@ import (
 var pairs = []struct{ src, dst string }{
 	{"servers.json", "internal/serverlist/embedded/servers.json"},
 	{"schema/servers.schema.json", "internal/serverlist/embedded/servers.schema.json"},
+	{"schema/results.schema.json", "internal/results/embedded/results.schema.json"},
 }
 
 func main() {

@@ -404,3 +404,21 @@ func TestResultRemoteHostEmpty(t *testing.T) {
 		t.Errorf("RemoteHost() = %q, want empty when nothing is connected", got.RemoteHost())
 	}
 }
+
+// GitHub serves release assets through a redirect, so a client that refuses
+// redirects fails here. The error must say so rather than reporting a bare 302.
+func TestFetchExplainsARefusedRedirect(t *testing.T) {
+	a := asset{name: "iperf3-test", sha256: hashOf([]byte("x")), binary: "iperf3"}
+	doer := &fakeDoer{body: []byte(""), status: http.StatusFound}
+
+	_, err := ensureAsset(context.Background(), t.TempDir(), a, doer)
+	if err == nil {
+		t.Fatal("ensureAsset() accepted a 302")
+	}
+	if !strings.Contains(err.Error(), "does not follow redirects") {
+		t.Errorf("error = %v, want it to explain the redirect problem", err)
+	}
+	if !strings.Contains(err.Error(), "302") {
+		t.Errorf("error = %v, want it to name the status", err)
+	}
+}

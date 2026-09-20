@@ -462,11 +462,15 @@ The brief's caps cannot produce its stated totals across **two** phases. Arithme
 | Brief's Quick (2 samples, 10 s + 8 s) | 10 servers | ~39 s | ~6.5 min | **~14 min** (brief says 4–6) |
 | Brief's Extended (3 × 30 s + 3 × 20 s) | 12 servers | ~160 s | ~32 min | **~64 min** (brief says 20–30) |
 | **Plan Quick, as shipped** (1 sample, 12 s + 8 s) | 2/group = 10 | ~20 s | ~3.3 min | **~7 min** ✓ |
-| **Plan Extended** (3 × 15 s + 3 × 10 s) | 2/group = 10 | ~85 s | ~14 min | **~29 min** ✓ |
+| **Plan Extended, as shipped** (3 × 15 s + 3 × 10 s) | whole list = 32 | ~70 s | ~38 min | **~75 min** |
 
 The plan's caps are therefore: **Quick = 2 servers per group, 1 download sample (12 s), 1 upload sample (8 s), 10 pings. Extended = 2 servers per group, median of 3 (15 s / 10 s), 30 pings.**
 
-**Correction made in Phase 3.** Quick was specified as 1 server per group, which cannot satisfy the simultaneous requirement of an upload target per group: no single server covers both the download and upload legs in most groups. Quick therefore ships 2 servers per group — one download-led, one upload-led — costing about a minute over the original 5–6 minute estimate. The estimate shown in the TUI is computed from the live selection, so the real number is always visible. `--extended` on a custom selection of 20 servers will legitimately take ~55 min — so the estimate is **computed live from the actual selection** and displayed, never hard-coded. If you would rather keep the brief's 30 s/100 MB extended caps, Extended becomes a ~60 min run; that is a real trade-off and I have defaulted to the faster one.
+**Corrections made as the phases landed.**
+
+*Phase 3 — quick tier.* Quick was specified as 1 server per group, which cannot satisfy the simultaneous requirement of an upload target per group: no single server covers both the download and upload legs in most groups. Quick therefore ships 2 servers per group — one download-led, one upload-led — giving 10 servers and ~7.6 minutes for both phases, against the original 5–6 minute estimate.
+
+*Phase 5 — extended tier.* The 29-minute figure assumed 2 servers per group. Extended mode actually runs the **whole list** (32 servers), because that is what the `tier` field means: it marks which targets suffice for a fast signal, not which a thorough run may not touch. That is **~75 minutes for both phases**, not 29. Both figures above are now computed from the shipped list rather than assumed, and the runner advertises the real number from the live selection before it starts, so a user is never surprised mid-run. If a shorter thorough run is wanted, select groups explicitly or lower the caps; the trade-off is visible rather than hidden. `--extended` on a custom selection of 20 servers will legitimately take ~55 min — so the estimate is **computed live from the actual selection** and displayed, never hard-coded. If you would rather keep the brief's 30 s/100 MB extended caps, Extended becomes a ~60 min run; that is a real trade-off and I have defaulted to the faster one.
 
 ### 5.8 Once per phase
 
@@ -596,6 +600,8 @@ Unsigned binaries trip SmartScreen for **browser** downloads but not for launche
 | R8 | **Unprivileged ICMP unavailable** (esp. Linux `ping_group_range`) | Latency series silently becomes a different metric | Detect, fall back to TCP RTT, label every cell, print the sysctl fix without applying it |
 | R9 | **IPv6 silently preferred** on AAAA-first hosts | "IPv4 default" claim is false | Force `tcp4` unless `--ipv6`; record and display family + resolved IP per phase |
 | R10 | **WARP states that are not `on`** (WARP+, Zero Trust, DoH-only) | User stuck at the pause, or wrong conclusion | Explain `plus`/`gateway=`/DoH-only explicitly; refuse unless overridden; record the override |
+| R17 | **The measurement HTTP client refuses redirects, which breaks a release download** | The iperf3 binary could not be fetched (bare 302) | Asset downloads use a separate redirect-following client; the measurement client keeps refusing redirects so a sample cannot silently change host. Both are now pinned by tests. |
+| R18 | **Reporting measurement noise as a finding** | A 0.01 ms latency change reported as a regression destroys a published report's credibility | Deltas below a 0.5% relative threshold (0.05 pp for loss) read as "same", and the headline and the table share one `Verdict` so they cannot disagree. |
 | R11 | **`servers.json` is remote input** | Supply-chain / DoS | Schema validation, strict size limit, no code execution, embedded fallback, HTTPS only |
 | R12 | **PS 5.1 TLS defaults below 1.2** | Opaque launcher failure on older Windows | Explicit `SecurityProtocol` including `Tls12` |
 | R13 | **`curl \| bash` truncation** | Partially-executed installer | `main "$@"` on the last line; `set -eu`; ERR trap |
@@ -656,4 +662,4 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 2. ~~Q1, Q2, Q4~~ — **answered**; see §12.
 3. Remaining optional choices **Q3** (windows/arm64 iperf3), **Q5** (licence), **Q6** (datautama mirror), **Q7** (short link). None blocks Phase 2.
 
-**Next step:** Phase 5 — the runner: phase orchestration, fairness rules, live duration estimates, `--phase`/`--compare` and the JSON schema (§14).
+**Next step:** Phase 6 — the TUI: server-selection checklist, live progress table, the WARP pause screen, and the results view with side-by-side bars (§14).

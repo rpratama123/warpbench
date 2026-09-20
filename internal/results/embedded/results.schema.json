@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/rpratama123/warpbench/main/schema/results.schema.json",
+  "title": "warpbench result file",
+  "description": "One phase of measurements. Written by warpbench, read by --compare and by later versions. Every raw sample is retained so a reader can recompute the summary rather than trusting it.",
+  "type": "object",
+  "required": [
+    "schema",
+    "tool",
+    "phase",
+    "started_at",
+    "ended_at",
+    "configuration",
+    "server_list",
+    "environment",
+    "traces",
+    "servers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "Document version. Readers reject anything they do not understand.",
+      "const": 1
+    },
+    "tool": { "$ref": "#/$defs/tool" },
+    "phase": {
+      "description": "Which half of the comparison this file is.",
+      "enum": ["baseline", "warp"]
+    },
+    "started_at": { "type": "string", "minLength": 1 },
+    "ended_at": { "type": "string", "minLength": 1 },
+    "duration_seconds": { "type": "number", "minimum": 0 },
+    "configuration": { "$ref": "#/$defs/configuration" },
+    "server_list": { "$ref": "#/$defs/serverListRef" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "traces": {
+      "description": "WARP-state readings, recorded at every sampling point rather than only the last.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/trace" }
+    },
+    "servers": {
+      "description": "Measured targets, in the canonical order of the server list so two phases can be compared without reordering.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/server" }
+    },
+    "warnings": {
+      "description": "Run-level problems: a failed fetch, an override, a trace that could not be read.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "required": ["version"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "commit": { "type": "string" },
+        "go": { "type": "string" }
+      }
+    },
+
+    "configuration": {
+      "description": "The effective configuration, complete enough to reproduce the run from the file alone.",
+      "type": "object",
+      "required": ["mode", "server_ids", "parallel", "ipv6"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["quick", "extended", "custom"] },
+        "groups": { "type": "array", "items": { "type": "string" } },
+        "server_ids": { "type": "array", "items": { "type": "string" } },
+        "parallel": { "type": "integer", "minimum": 1 },
+        "ipv6": { "type": "boolean" },
+        "masked": { "type": "boolean" },
+        "download_seconds": { "type": "number", "minimum": 0 },
+        "upload_seconds": { "type": "number", "minimum": 0 },
+        "download_samples": { "type": "integer", "minimum": 0 },
+        "upload_samples": { "type": "integer", "minimum": 0 },
+        "ping_count": { "type": "integer", "minimum": 0 },
+        "timing_samples": { "type": "integer", "minimum": 0 },
+        "warmup_seconds": { "type": "number", "minimum": 0 },
+        "min_bytes": { "type": "integer", "minimum": 0 },
+        "max_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "serverListRef": {
+      "description": "Which server list was measured against. Without this a result cannot be attributed to a set of targets.",
+      "type": "object",
+      "required": ["schema", "revision", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "type": "integer", "minimum": 1 },
+        "revision": { "type": "string" },
+        "source": { "enum": ["remote", "cache", "embedded", "override"] },
+        "origin": { "type": "string" }
+      }
+    },
+
+    "environment": {
+      "type": "object",
+      "required": ["os", "arch"],
+      "additionalProperties": false,
+      "properties": {
+        "os": { "type": "string" },
+        "arch": { "type": "string" },
+        "go": { "type": "string" },
+        "local_time": { "type": "string" },
+        "timezone": { "type": "string" }
+      }
+    },
+
+    "trace": {
+      "type": "object",
+      "required": ["stage", "warp"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": {
+          "description": "Where in the run the reading was taken.",
+          "type": "string"
+        },
+        "at": { "type": "string" },
+        "warp": {
+          "description": "unknown is deliberately distinct from off: 'could not tell' and 'it is off' are different findings.",
+          "enum": ["off", "on", "plus", "unknown"]
+        },
+        "warp_raw": { "type": "string" },
+        "colo": { "type": "string" },
+        "ip": { "type": "string" },
+        "gateway": { "type": "string" },
+        "loc": { "type": "string" },
+        "http": { "type": "string" },
+        "tls": { "type": "string" },
+        "kex": { "type": "string" },
+        "rbi": { "type": "string" },
+        "visit_scheme": { "type": "string" },
+        "ts": { "type": "string" },
+        "err": { "type": "string" }
+      }
+    },
+
+    "server": {
+      "type": "object",
+      "required": ["id", "name", "group", "protocol"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "group": { "type": "string" },
+        "protocol": { "enum": ["librespeed", "http-file", "cloudflare", "iperf3"] },
+        "provider": { "type": "string" },
+        "city": { "type": "string" },
+        "country": { "type": "string" },
+        "resolved_ip": { "type": "string" },
+        "ping": {
+          "description": "null when the metric was not measured, which is different from a measured zero.",
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/ping" }]
+        },
+        "timings": {
+          "description": "null when the metric was not measured, which is different from a measured zero.",
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/timings" }]
+        },
+        "download": {
+          "description": "null when the metric was not measured, which is different from a measured zero.",
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/series" }]
+        },
+        "upload": {
+          "description": "null when the metric was not measured, which is different from a measured zero.",
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/series" }]
+        },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "ping": {
+      "type": "object",
+      "required": ["method", "sent", "received"],
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "description": "icmp and tcp are different quantities and must never be presented as one another.",
+          "enum": ["icmp", "tcp"]
+        },
+        "target": { "type": "string" },
+        "sent": { "type": "integer", "minimum": 0 },
+        "received": { "type": "integer", "minimum": 0 },
+        "loss_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "min_ms": { "type": "number", "minimum": 0 },
+        "avg_ms": { "type": "number", "minimum": 0 },
+        "median_ms": { "type": "number", "minimum": 0 },
+        "max_ms": { "type": "number", "minimum": 0 },
+        "p95_ms": { "type": "number", "minimum": 0 },
+        "stddev_ms": { "type": "number", "minimum": 0 },
+        "jitter_ms": { "type": "number", "minimum": 0 },
+        "warning": { "type": "string" }
+      }
+    },
+
+    "timings": {
+      "type": "object",
+      "required": ["samples"],
+      "additionalProperties": false,
+      "properties": {
+        "dns_ms": { "type": "number", "minimum": 0 },
+        "connect_ms": { "type": "number", "minimum": 0 },
+        "tls_ms": { "type": "number", "minimum": 0 },
+        "ttfb_ms": { "type": "number", "minimum": 0 },
+        "total_ms": { "type": "number", "minimum": 0 },
+        "remote_ip": { "type": "string" },
+        "proto": { "type": "string" },
+        "tls_version": { "type": "string" },
+        "samples": { "type": "integer", "minimum": 0 },
+        "dns_ran": {
+          "description": "Occurrence is separate from duration: a fast phase can measure as 0ms, and that is not the same as not having run.",
+          "type": "boolean"
+        },
+        "connect_ran": { "type": "boolean" },
+        "tls_ran": { "type": "boolean" },
+        "first_byte_ran": { "type": "boolean" }
+      }
+    },
+
+    "series": {
+      "type": "object",
+      "required": ["metric", "samples", "parallel"],
+      "additionalProperties": false,
+      "properties": {
+        "metric": { "enum": ["download", "upload"] },
+        "samples": { "type": "array", "items": { "$ref": "#/$defs/sample" } },
+        "median_steady_mbps": { "type": "number", "minimum": 0 },
+        "median_overall_mbps": { "type": "number", "minimum": 0 },
+        "parallel": {
+          "description": "Stream count. A multi-stream series is a different measurement and must not be merged with a single-stream one.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+
+    "sample": {
+      "type": "object",
+      "required": ["bytes", "elapsed_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "bytes": { "type": "integer", "minimum": 0 },
+        "elapsed_ms": { "type": "number", "minimum": 0 },
+        "steady_bytes": { "type": "integer", "minimum": 0 },
+        "steady_for_ms": { "type": "number", "minimum": 0 },
+        "steady_mbps": { "type": "number", "minimum": 0 },
+        "overall_mbps": { "type": "number", "minimum": 0 },
+        "parallel": { "type": "integer", "minimum": 1 },
+        "proto": { "type": "string" },
+        "remote_ip": { "type": "string" },
+        "undersized": { "type": "boolean" },
+        "truncated": { "type": "boolean" },
+        "partial": { "type": "boolean" },
+        "error": { "type": "string" }
+      }
+    }
+  }
+}

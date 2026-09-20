@@ -80,22 +80,21 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 	}
 }
 
-// Until the measurement engine lands, a bare invocation must fail loudly rather
-// than exit 0 and look like a successful run to a script.
-func TestBareInvocationReportsUnimplemented(t *testing.T) {
+// A bare invocation cannot know which phase to measure, so it must fail as a
+// usage error rather than guessing and writing a result that means nothing.
+func TestBareInvocationRequiresAPhase(t *testing.T) {
 	code, stdout, stderr := runCapture(t, nil, alwaysTTY)
 
-	if code != exitError {
-		t.Errorf("exit code = %d, want %d", code, exitError)
+	if code != exitUsage {
+		t.Errorf("exit code = %d, want %d", code, exitUsage)
 	}
 	if stdout != "" {
 		t.Errorf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "not implemented") {
-		t.Errorf("stderr = %q, want it to explain the engine is not implemented", stderr)
-	}
-	if !strings.Contains(stderr, "--doctor") {
-		t.Errorf("stderr = %q, want it to point at --doctor", stderr)
+	for _, want := range []string{"--phase", "baseline", "warp"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to mention %q", stderr, want)
+		}
 	}
 }
 

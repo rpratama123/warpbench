@@ -55,6 +55,12 @@ func (c *HTTPClient) Do(req *http.Request) (*http.Response, error) {
 	return c.client.Do(req)
 }
 
+// Client exposes the underlying *http.Client so the latency and trace probes
+// can share exactly the same connection policy as the throughput adapters.
+// Measuring them with a different client would mean the phases could differ in
+// connection behaviour for reasons unrelated to WARP.
+func (c *HTTPClient) Client() *http.Client { return c.client }
+
 // maxRequestsPerSample bounds how many requests one sample may issue.
 //
 // The loop exists to fill the measurement window when a target serves a finite

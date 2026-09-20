@@ -1,26 +1,28 @@
-// Command warpbench measures what Cloudflare WARP actually changes on a
-// congested ISP uplink: latency, jitter, packet loss, connection-setup timings,
-// and download/upload throughput, first on the raw ISP path and then over WARP.
-//
-// The measurement engine lands in later phases. Argument parsing, version
-// reporting, interactive-console detection, cache-directory resolution and
-// server-list loading are real and tested.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"golang.org/x/term"
 
 	"github.com/rpratama123/warpbench/internal/config"
+	"github.com/rpratama123/warpbench/internal/iperf3"
+	"github.com/rpratama123/warpbench/internal/results"
+	"github.com/rpratama123/warpbench/internal/runner"
 	"github.com/rpratama123/warpbench/internal/serverlist"
+	"github.com/rpratama123/warpbench/internal/throughput"
+	"github.com/rpratama123/warpbench/internal/trace"
 	"github.com/rpratama123/warpbench/internal/version"
 )
 
@@ -34,14 +36,29 @@ const (
 
 const repoURL = "https://github.com/rpratama123/warpbench"
 
-// options holds the flags implemented so far. The remainder of the documented
-// flag set (--quick/--extended/--phase/--compare/...) arrives with the runner.
+// options holds the parsed flags.
 type options struct {
 	showVersion bool
 	doctor      bool
 	noTTY       bool
 	offline     bool
 	servers     string
+
+	quick    bool
+	extended bool
+	groups   string
+	phase    string
+	out      string
+	compare  bool
+	force    bool
+	parallel int
+	ipv6     bool
+	noMask   bool
+	jsonOut  bool
+	yes      bool
+
+	// positional holds arguments after the flags, used by --compare.
+	positional []string
 }
 
 func main() {
@@ -66,7 +83,7 @@ func writef(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format, args...)
 }
 
-// userAgent identifies us to the endpoints we fetch from.
+// userAgent identifies us to every endpoint we contact.
 func userAgent() string {
 	return "warpbench/" + version.Short() + " (+" + repoURL + ")"
 }
@@ -87,13 +104,11 @@ func run(args []string, stdout, stderr io.Writer, isTTY func() bool) int {
 		return exitOK
 	case opts.doctor:
 		return doctor(stdout, opts, isTTY)
+	case opts.compare:
+		return runCompare(opts, stdout, stderr)
+	default:
+		return runPhase(opts, stdout, stderr, isTTY)
 	}
-
-	writef(stderr, "%s\n\n", version.String())
-	writef(stderr, "The measurement engine is not implemented yet, so there is nothing to\n")
-	writef(stderr, "measure. Run 'warpbench --doctor' to check the local environment.\n")
-	writef(stderr, "\nPlan and progress: %s\n", repoURL)
-	return exitError
 }
 
 func parseArgs(args []string, stderr io.Writer) (options, error) {
@@ -111,6 +126,19 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	fs.BoolVar(&opts.offline, "offline", false, "do not touch the network; use the cached or embedded server list")
 	fs.StringVar(&opts.servers, "servers", "", "use a server list from `path` or URL instead of the built-in one")
 
+	fs.BoolVar(&opts.quick, "quick", false, "measure the quick tier (default)")
+	fs.BoolVar(&opts.extended, "extended", false, "measure every server in the list")
+	fs.StringVar(&opts.groups, "groups", "", "comma-separated group ids to measure, e.g. id,sg")
+	fs.StringVar(&opts.phase, "phase", "", "phase to measure: baseline or warp")
+	fs.StringVar(&opts.out, "out", "", "write the result JSON to `path`")
+	fs.BoolVar(&opts.compare, "compare", false, "compare two result files given as arguments")
+	fs.BoolVar(&opts.force, "force", false, "proceed despite a WARP-state or server-list-revision mismatch")
+	fs.IntVar(&opts.parallel, "parallel", 1, "concurrent streams for throughput samples")
+	fs.BoolVar(&opts.ipv6, "ipv6", false, "measure over IPv6 instead of IPv4")
+	fs.BoolVar(&opts.noMask, "no-mask", false, "do not mask the public IP in saved results")
+	fs.BoolVar(&opts.jsonOut, "json", false, "print the result JSON to stdout")
+	fs.BoolVar(&opts.yes, "yes", false, "assume yes to prompts")
+
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return options{}, err
@@ -119,10 +147,27 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 		return options{}, err
 	}
 
-	if fs.NArg() > 0 {
-		writef(stderr, "warpbench: unexpected argument %q\n", fs.Arg(0))
+	opts.positional = fs.Args()
+
+	if opts.compare {
+		if len(opts.positional) != 2 {
+			writef(stderr, "warpbench: --compare needs exactly two result files, got %d\n", len(opts.positional))
+			writef(stderr, "Run 'warpbench --help' for usage.\n")
+			return options{}, errors.New("--compare needs two files")
+		}
+	} else if len(opts.positional) > 0 {
+		writef(stderr, "warpbench: unexpected argument %q\n", opts.positional[0])
 		writef(stderr, "Run 'warpbench --help' for usage.\n")
 		return options{}, errors.New("unexpected positional argument")
+	}
+
+	if opts.quick && opts.extended {
+		writef(stderr, "warpbench: --quick and --extended are mutually exclusive\n")
+		return options{}, errors.New("conflicting modes")
+	}
+	if opts.parallel < 1 {
+		writef(stderr, "warpbench: --parallel must be at least 1\n")
+		return options{}, errors.New("bad parallel value")
 	}
 
 	return opts, nil
@@ -131,18 +176,34 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 const usageText = `warpbench - measure what Cloudflare WARP changes on your ISP path
 
 Usage:
-  warpbench [flags]
+  warpbench [flags]                  measure one phase
+  warpbench --compare A.json B.json  compare a baseline against a warp result
 
 Flags:
-  --version        print version information and exit
-  --doctor         report the local environment and exit
-  --no-tty         never draw a TUI; print plain, non-interactive output
-  --offline        do not touch the network; use the cached or embedded list
-  --servers PATH   use a server list from PATH or a URL
-  -h, --help       show this help and exit
+  --quick            measure the quick tier (default)
+  --extended         measure every server in the list
+  --groups LIST      comma-separated group ids, e.g. id,sg
+  --phase PHASE      baseline or warp (required to measure)
+  --out PATH         write the result JSON to PATH
+  --compare          compare two result files given as arguments
+  --force            proceed despite a state or revision mismatch
+  --parallel N       concurrent streams for throughput samples (default 1)
+  --ipv6             measure over IPv6 instead of IPv4
+  --no-mask          do not mask the public IP in saved results
+  --json             print the result JSON to stdout
+  --yes              assume yes to prompts
+  --servers PATH     use a server list from PATH or a URL
+  --offline          do not touch the network; use the cached or embedded list
+  --doctor           report the local environment and exit
+  --no-tty           never draw a TUI; print plain, non-interactive output
+  --version          print version information and exit
+  -h, --help         show this help and exit
 
-Status:
-  The measurement engine is not implemented yet.
+Typical use:
+  warpbench --quick --phase baseline --out baseline.json
+  # turn WARP on
+  warpbench --quick --phase warp --out warp.json
+  warpbench --compare baseline.json warp.json
 
 Plan and progress:
   ` + repoURL + `
@@ -219,4 +280,183 @@ func checkWritable(dir string) error {
 		return err
 	}
 	return os.Remove(filepath.Clean(name))
+}
+
+// --- the measure path ------------------------------------------------------
+
+func runPhase(opts options, stdout, stderr io.Writer, isTTY func() bool) int {
+	phase := strings.ToLower(strings.TrimSpace(opts.phase))
+	if phase != "baseline" && phase != "warp" {
+		writef(stderr, "warpbench: --phase must be baseline or warp (got %q)\n", opts.phase)
+		writef(stderr, "Run 'warpbench --help' for usage.\n")
+		return exitUsage
+	}
+
+	ctx := context.Background()
+
+	cacheDir, err := config.EnsureCacheDir()
+	if err != nil {
+		writef(stderr, "warpbench: %v\n", err)
+		return exitError
+	}
+
+	list, err := serverlist.Load(ctx, serverlist.Options{
+		Override:  opts.servers,
+		CacheDir:  cacheDir,
+		Offline:   opts.offline,
+		UserAgent: userAgent(),
+	})
+	if err != nil {
+		writef(stderr, "warpbench: loading the server list: %v\n", err)
+		return exitError
+	}
+	for _, warn := range list.Warnings {
+		writef(stderr, "warpbench: warning: %s\n", warn)
+	}
+
+	mode := runner.ModeQuick
+	if opts.extended {
+		mode = runner.ModeExtended
+	}
+
+	groups := splitList(opts.groups)
+	selected := runner.Select(list.List, mode, groups, nil)
+	if len(selected) == 0 {
+		writef(stderr, "warpbench: no servers selected for mode %s and groups %v\n", mode, groups)
+		return exitUsage
+	}
+
+	budget := runner.BudgetFor(mode).WithParallel(opts.parallel)
+	estimate := runner.Estimate(selected, budget)
+
+	client := throughput.NewHTTPClient(0)
+
+	// A separate client for downloading the pinned iperf3 binary. The
+	// measurement client refuses redirects on purpose, and GitHub serves release
+	// assets through one, so sharing it would break the download.
+	assetClient := &http.Client{Timeout: 3 * time.Minute}
+
+	// The state check is what makes the comparison meaningful. Measuring a
+	// "baseline" with WARP already on produces a file that looks fine and means
+	// nothing.
+	probe, _ := trace.Fetch(ctx, client.Client(), trace.DefaultURL, "preflight")
+	if code := checkPhaseState(probe, phase, opts.force, stderr); code != exitOK {
+		return code
+	}
+
+	writef(stderr, "measuring %d server(s) in %s mode; estimated %s for this phase\n",
+		len(selected), mode, estimate.Round(time.Second))
+
+	prog := &textProgress{w: stderr}
+
+	file, err := runner.Run(ctx, runner.Config{
+		Phase:            phase,
+		Mode:             mode,
+		List:             list.List,
+		Servers:          selected,
+		Groups:           groups,
+		Budget:           budget,
+		IPv6:             opts.ipv6,
+		Masked:           !opts.noMask,
+		Offline:          opts.offline,
+		ServerListSource: list.Source,
+		ServerListOrigin: list.Origin,
+		Progress:         prog,
+		Tool: results.Tool{
+			Version: version.Short(),
+			Commit:  version.Commit,
+			Go:      runtime.Version(),
+		},
+	}, runner.Deps{
+		TraceDoer: client.Client(),
+		Client:    client,
+		UserAgent: userAgent(),
+		IPerf3Bin: func(ctx context.Context) (string, error) {
+			return iperf3.Ensure(ctx, cacheDir, assetClient)
+		},
+	})
+	if err != nil {
+		writef(stderr, "warpbench: %v\n", err)
+		return exitError
+	}
+
+	if opts.force {
+		file.Warnings = append(file.Warnings, "run proceeded with --force despite a state or revision mismatch")
+	}
+
+	outPath := opts.out
+	if outPath == "" {
+		outPath = defaultOutPath(phase, file.StartedAt)
+	}
+	if err := results.Write(outPath, file); err != nil {
+		writef(stderr, "warpbench: %v\n", err)
+		return exitError
+	}
+
+	writef(stderr, "\nwrote %s\n", outPath)
+	prog.Summary(file)
+
+	if opts.jsonOut {
+		data, err := json.MarshalIndent(file, "", "  ")
+		if err != nil {
+			writef(stderr, "warpbench: %v\n", err)
+			return exitError
+		}
+		writef(stdout, "%s\n", data)
+	}
+
+	return exitOK
+}
+
+// checkPhaseState refuses to measure a phase the trace endpoint contradicts.
+func checkPhaseState(probe trace.Result, phase string, force bool, stderr io.Writer) int {
+	if probe.Err != "" {
+		writef(stderr, "warpbench: could not read the WARP state (%s); continuing with the state unknown\n", probe.Err)
+		return exitOK
+	}
+
+	wantOn := phase == "warp"
+	if probe.WarpEnabled() == wantOn {
+		return exitOK
+	}
+
+	detail := fmt.Sprintf("the %s phase expects WARP to be %s, but the trace endpoint reports warp=%s",
+		phase, onOff(wantOn), probe.Warp)
+
+	if force {
+		writef(stderr, "warpbench: WARNING: %s; continuing because --force was given\n", detail)
+		return exitOK
+	}
+
+	writef(stderr, "warpbench: %s\n", detail)
+	if explain := probe.Explain(); explain != "" {
+		writef(stderr, "warpbench: %s\n", explain)
+	}
+	writef(stderr, "warpbench: pass --force to measure anyway, and the override will be recorded\n")
+	return exitError
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
+}
+
+func defaultOutPath(phase string, at time.Time) string {
+	return fmt.Sprintf("warpbench-%s-%s.json", at.Format("20060102-1504"), phase)
+}
+
+func splitList(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
