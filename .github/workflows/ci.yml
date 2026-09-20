@@ -166,6 +166,30 @@ jobs:
       - name: Check the tools scripts
         run: shellcheck -s bash tools/check-release-assets.sh
 
+  # GitHub reports a malformed workflow only as "a workflow file issue", and
+  # only after it has already been pushed. A tag that fails to release is worse
+  # than a failing lint job.
+  lint-workflows:
+    name: lint (workflows)
+    runs-on: ubuntu-latest
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSL -o /tmp/actionlint.tar.gz "$url"
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 /tmp/actionlint "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+
+      - name: Run actionlint
+        run: actionlint
+
   lint-powershell:
     name: lint (powershell)
     runs-on: ubuntu-latest

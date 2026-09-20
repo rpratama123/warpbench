@@ -14,22 +14,15 @@ permissions:
   contents: read
 
 jobs:
-  install-on-each-platform:
-    name: install (${{ matrix.label }})
+  install-unix:
+    name: install (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { label: "linux bash", os: ubuntu-latest, kind: bash }
-          - { label: "macos bash", os: macos-latest, kind: bash }
-          # Windows PowerShell 5.1 and PowerShell 7 are different interpreters,
-          # and the launcher has to work on both.
-          - { label: "windows PS 5.1", os: windows-latest, kind: powershell }
-          - { label: "windows PS 7", os: windows-latest, kind: pwsh }
+        os: [ubuntu-latest, macos-latest]
     steps:
-      - name: Install via the documented one-liner (bash)
-        if: matrix.kind == 'bash'
+      - name: Install via the documented one-liner
         shell: bash
         run: |
           set -euo pipefail
@@ -40,12 +33,20 @@ jobs:
             *) echo "::error::unexpected output from the launcher: $out"; exit 1 ;;
           esac
 
+  # Windows PowerShell 5.1 and PowerShell 7 are different interpreters and the
+  # launcher has to work on both, so they are separate steps with literal
+  # shells. `shell` cannot be an expression: the matrix context is not available
+  # in that field, which actionlint catches and GitHub reports only as "a
+  # workflow file issue".
+  install-windows:
+    name: install (windows)
+    runs-on: windows-latest
+    steps:
       # `irm | iex` cannot forward arguments, so the launcher is fetched to a
-      # file and run with --version. That exercises the same four steps: detect
-      # the platform, download, verify the checksum, exec.
-      - name: Install via the documented one-liner (PowerShell)
-        if: matrix.kind != 'bash'
-        shell: ${{ matrix.kind }}
+      # file and run with --version. That still exercises the whole path: detect
+      # the platform, download, verify the checksum, execute.
+      - name: Windows PowerShell 5.1
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $url = 'https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.ps1'
@@ -53,15 +54,27 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $script -UseBasicParsing
           $out = & $script --version
           Write-Host $out
-          if ($out -notmatch 'warpbench') { throw "unexpected output from the launcher: $out" }
-          Write-Host "$($PSVersionTable.PSVersion) launcher worked"
+          if ($out -notmatch 'warpbench') { throw "unexpected output: $out" }
+          Write-Host "launcher worked under $($PSVersionTable.PSVersion)"
+
+      - name: PowerShell 7
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.ps1'
+          $script = Join-Path $env:RUNNER_TEMP 'warpbench.ps1'
+          Invoke-WebRequest -Uri $url -OutFile $script -UseBasicParsing
+          $out = & $script --version
+          Write-Host $out
+          if ($out -notmatch 'warpbench') { throw "unexpected output: $out" }
+          Write-Host "launcher worked under $($PSVersionTable.PSVersion)"
 
   verify-signature:
     name: verify the checksum signature
     runs-on: ubuntu-latest
     steps:
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Download the release assets
         env:

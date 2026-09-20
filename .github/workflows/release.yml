@@ -48,7 +48,8 @@ jobs:
           go test ./...
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        # Pinned to a full version: this action publishes no moving major tag.
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Show cosign version
         run: cosign version
