@@ -102,18 +102,29 @@ wrong when reading a result:
 
 ```sh
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.sh | bash
+curl -fsSL https://rullypratama.com/warpbench.sh | bash
 ```
 
 ```powershell
 # Windows (Windows PowerShell 5.1 or PowerShell 7)
-irm https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.ps1 | iex
+irm https://rullypratama.com/warpbench.ps1 | iex
 ```
 
-Those URLs are stable. They are served from `main`, not from a release tag, and
-the launcher resolves the binary version itself — so a short link built on one
-of them keeps working across every future release, and the launcher can be fixed
-without anyone re-issuing a link.
+Those short links `301` to the canonical files below. That is the whole
+mechanism: they are a redirect, not a cached copy, so the launcher always comes
+from `main` and a change there reaches everyone without re-pointing anything.
+Keep the `https://` — without it the first hop is plaintext, and a redirect
+followed on an unencrypted hop could send you a different script to pipe into
+`bash`.
+
+```
+https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.sh
+https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.ps1
+```
+
+Both forms are stable: they are served from `main`, not from a release tag, and
+the launcher resolves the binary version itself, so they keep working across
+every future release.
 
 The launcher does four things and nothing else: detect the platform, download
 the matching binary and `SHA256SUMS` into a per-user cache, verify the checksum,
@@ -124,7 +135,7 @@ run a binary whose checksum does not match. Reading it takes about two minutes:
 To pin a version rather than take the latest:
 
 ```sh
-curl -fsSL .../warpbench.sh | WARPBENCH_VERSION=v0.1.0 bash
+curl -fsSL https://rullypratama.com/warpbench.sh | WARPBENCH_VERSION=v0.1.0 bash
 ```
 
 ### Verify a download yourself

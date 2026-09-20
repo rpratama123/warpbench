@@ -31,7 +31,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          out=$(curl -fsSL https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.sh | bash -s -- --version)
+          # The short link users copy, not the canonical URL it redirects to.
+          # Verifying the redirect is the point: if the domain or the rule
+          # breaks, this fails here rather than for a reader following the
+          # README.
+          out=$(curl -fsSL https://rullypratama.com/warpbench.sh | bash -s -- --version)
           echo "$out"
           case "$out" in
             *warpbench*) echo "launcher worked: $out" ;;
@@ -54,7 +58,8 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $url = 'https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.ps1'
+          # The short link users copy, so the redirect is verified too.
+          $url = 'https://rullypratama.com/warpbench.ps1'
           $script = Join-Path $env:RUNNER_TEMP 'warpbench.ps1'
           Invoke-WebRequest -Uri $url -OutFile $script -UseBasicParsing
           $out = & $script --version
@@ -66,7 +71,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $url = 'https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.ps1'
+          $url = 'https://rullypratama.com/warpbench.ps1'
           $script = Join-Path $env:RUNNER_TEMP 'warpbench.ps1'
           Invoke-WebRequest -Uri $url -OutFile $script -UseBasicParsing
           $out = & $script --version

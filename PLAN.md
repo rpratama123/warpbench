@@ -633,7 +633,7 @@ Unsigned binaries trip SmartScreen for **browser** downloads but not for launche
 | Q3 | windows/arm64 has no iperf3 — acceptable to degrade, or must option B land to close it? | Acceptable to degrade with an explicit `N/A`; B closes it later. |
 | Q5 | Licence — MIT or Apache-2.0? | **MIT** (matches the audience; Apache-2.0 only if you want a patent grant). |
 | Q6 | Keep the datautama Ubuntu mirror, given R5? | **Keep** — it is the only verified domestic non-Cloudflare control, and it is what makes the "WARP helps international, not domestic" claim testable. |
-| Q7 | Is a short-link service already chosen for the README one-liners? | Any HTTPS redirector; needed only for docs, not code. |
+| Q7 | ~~Short-link service for the README one-liners~~ | **Answered: `rullypratama.com/warpbench.{sh,ps1}`**, a single 301 to the canonical files. Both are exercised by the release verification workflow. |
 
 ---
 
