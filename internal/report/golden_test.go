@@ -15,6 +15,12 @@ const testCommandLine = "warpbench --quick --groups id,sg,eu --phase baseline --
 
 func goldenPath() string { return filepath.Join("testdata", "report.md") }
 
+// normaliseNewlines strips carriage returns so a Windows checkout compares
+// equal on content.
+func normaliseNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
+}
+
 // TestMarkdownGolden pins the whole document.
 //
 // A report is a published artefact, so its shape is part of the deliverable: a
@@ -38,6 +44,12 @@ func TestMarkdownGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the golden file: %v\nrun with WARPBENCH_UPDATE_GOLDEN=1 to create it", err)
 	}
+
+	// Compare on normalised line endings. .gitattributes keeps the repository
+	// LF, but a checkout that predates it, or a contributor with an unusual
+	// autocrlf setting, should see a content diff rather than a whole-file one.
+	got = []byte(normaliseNewlines(string(got)))
+	want = []byte(normaliseNewlines(string(want)))
 
 	if bytes.Equal(got, want) {
 		return

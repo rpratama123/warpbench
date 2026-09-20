@@ -1,0 +1,18 @@
+# Normalise line endings in the repository and in every working tree.
+#
+# This is not cosmetic for this project. The launchers are piped into sh/bash,
+# where a stray carriage return breaks them -- the classic "curl | bash" CRLF
+# failure -- and the report golden file is compared byte for byte. A contributor
+# on Windows with core.autocrlf=true would otherwise break both.
+
+* text=auto eol=lf
+
+# Windows PowerShell reads LF scripts without complaint, so everything text is
+# LF and the repository has exactly one line-ending convention.
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
