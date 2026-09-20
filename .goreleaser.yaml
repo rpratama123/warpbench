@@ -73,6 +73,14 @@ signs:
     cmd: cosign
     artifacts: checksum
     output: true
+    # goreleaser decides which file to upload from this template, and it
+    # defaults to ${artifact}.sig. cosign v3 writes the signature and its
+    # certificate into a single .bundle instead, so without this override
+    # goreleaser signs correctly and then tries to upload a file that was never
+    # created: "failed to upload SHA256SUMS.sig: no such file or directory".
+    # The certificate template stays empty, which is how goreleaser is told
+    # there is no second file to upload.
+    signature: "${artifact}.bundle"
     args:
       - sign-blob
       - "--yes"
