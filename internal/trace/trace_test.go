@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -285,5 +286,146 @@ func TestParseIgnoresMalformedLines(t *testing.T) {
 	}
 	if _, ok := fields["nonsense"]; ok {
 		t.Error("a line without '=' should be ignored")
+	}
+}
+
+// --- endpoint fallback -----------------------------------------------------
+
+// routingDoer serves a trace body for one URL and fails every other.
+type routingDoer struct {
+	okURL   string
+	body    string
+	failErr error
+	calls   []string
+}
+
+func (d *routingDoer) Do(req *http.Request) (*http.Response, error) {
+	d.calls = append(d.calls, req.URL.String())
+	if d.failErr == nil {
+		// An http.Client never returns (nil, nil); make that impossible here so
+		// a fixture mistake cannot masquerade as a nil-response panic.
+		d.failErr = errors.New("request failed")
+	}
+	if req.URL.String() == d.okURL {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader(d.body)),
+			Header:     make(http.Header),
+		}, nil
+	}
+	return nil, d.failErr
+}
+
+// The check matters most while WARP is being switched on, which is also when
+// the resolver is being reconfigured. A hostname lookup failing there must not
+// leave the WARP state unknowable.
+func TestFallsBackToTheAddressEndpointWhenTheHostnameFails(t *testing.T) {
+	doer := &routingDoer{
+		okURL:   FallbackURL,
+		body:    "colo=SIN\nwarp=on\nip=203.0.113.9\ngateway=off\n",
+		failErr: errors.New("dial tcp: lookup cloudflare.com: i/o timeout"),
+	}
+
+	got, err := Fetch(context.Background(), doer, "", "warp-check")
+	if err != nil {
+		t.Fatalf("Fetch() error = %v, want the fallback to succeed", err)
+	}
+
+	if !got.Fallback {
+		t.Error("Fallback = false, want the reading marked as coming from the fallback")
+	}
+	if got.Source != FallbackURL {
+		t.Errorf("Source = %q, want %q", got.Source, FallbackURL)
+	}
+	if got.Warp != StateOn {
+		t.Errorf("Warp = %q, want on: the fallback serves the same document", got.Warp)
+	}
+	if got.Colo != "SIN" || got.IP != "203.0.113.9" {
+		t.Errorf("fields not parsed from the fallback: %+v", got)
+	}
+	if !strings.Contains(got.Describe(), "via-fallback") {
+		t.Errorf("Describe() = %q, want it to disclose the fallback", got.Describe())
+	}
+
+	if len(doer.calls) != 2 {
+		t.Fatalf("made %d calls, want the canonical endpoint then the fallback", len(doer.calls))
+	}
+	if doer.calls[0] != DefaultURL || doer.calls[1] != FallbackURL {
+		t.Errorf("call order = %v", doer.calls)
+	}
+}
+
+func TestUsesTheCanonicalEndpointWhenItWorks(t *testing.T) {
+	doer := &routingDoer{okURL: DefaultURL, body: "colo=SIN\nwarp=off\n"}
+
+	got, err := Fetch(context.Background(), doer, "", "preflight")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Fallback {
+		t.Error("Fallback = true although the canonical endpoint answered")
+	}
+	if len(doer.calls) != 1 {
+		t.Errorf("made %d calls, want exactly one", len(doer.calls))
+	}
+}
+
+// An explicit endpoint is the caller's choice and must not be second-guessed.
+func TestExplicitEndpointGetsNoFallback(t *testing.T) {
+	doer := &routingDoer{okURL: FallbackURL, body: "warp=on\n", failErr: errors.New("boom")}
+
+	_, err := Fetch(context.Background(), doer, "https://example.invalid/trace", "preflight")
+	if err == nil {
+		t.Fatal("Fetch() succeeded, want the explicit endpoint's failure")
+	}
+	for _, call := range doer.calls {
+		if call == FallbackURL {
+			t.Error("an explicit endpoint was silently replaced by the fallback")
+		}
+	}
+}
+
+// When both endpoints fail, the canonical failure is the more useful one.
+func TestBothEndpointsFailingReportsTheCanonicalError(t *testing.T) {
+	doer := &routingDoer{okURL: "nothing", failErr: errors.New("network is unreachable")}
+
+	got, err := Fetch(context.Background(), doer, "", "warp-check")
+	if err == nil {
+		t.Fatal("Fetch() succeeded with both endpoints failing")
+	}
+	if got.Warp != StateUnknown {
+		t.Errorf("Warp = %q, want unknown", got.Warp)
+	}
+	if got.Err == "" {
+		t.Error("the failure was not recorded on the Result")
+	}
+	if len(doer.calls) != 2 {
+		t.Errorf("made %d calls, want both endpoints tried", len(doer.calls))
+	}
+}
+
+func TestFallbackURLCarriesTheFieldsWeParse(t *testing.T) {
+	// Every field warpbench reads must be present at the address endpoint too,
+	// or the fallback would silently produce a different reading.
+	doer := &routingDoer{
+		okURL: FallbackURL,
+		body:  "colo=SIN\nwarp=plus\nip=203.0.113.9\ngateway=gw1\nloc=ID\nts=1\nhttp=http/2\ntls=TLSv1.3\nkex=X\nrbi=off\nvisit_scheme=https\n",
+	}
+
+	got, err := Fetch(context.Background(), doer, "", "warp-check")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checks := map[string]string{
+		"warp": got.WarpRaw, "colo": got.Colo, "ip": got.IP, "gateway": got.Gateway,
+		"loc": got.Loc, "ts": got.Timestamp, "http": got.HTTP, "tls": got.TLS,
+		"kex": got.Kex, "rbi": got.RBI, "visit_scheme": got.VisitScheme,
+	}
+	for field, value := range checks {
+		if value == "" {
+			t.Errorf("%s was not parsed from the fallback response", field)
+		}
 	}
 }

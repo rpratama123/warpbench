@@ -583,3 +583,157 @@ func TestResultsWorksBeforeAnyWindowSize(t *testing.T) {
 		t.Errorf("View() before a size = %q", m.View())
 	}
 }
+
+// --- pause: transient failures must not end the retry loop ----------------
+
+// The regression this suite exists for. A check that fails is the normal case
+// while WARP is being switched on and the resolver is being reconfigured, so a
+// failure must consume an attempt like any other and the loop must continue.
+//
+// Before the fix the retry was scheduled only on the success path, so the first
+// timeout ended automatic polling for the rest of the run and the user had to
+// press r by hand -- which is exactly what a bug report described.
+func TestFailedCheckKeepsPolling(t *testing.T) {
+	m := NewPauseModel(NewTheme(false), "warp", cannedCheck(trace.Result{}, errors.New("dial tcp: lookup cloudflare.com: i/o timeout")))
+
+	for attempt := 1; attempt <= maxTraceChecks; attempt++ {
+		var cmd tea.Cmd
+		m, cmd = m.Update(beginCheckMsg{})
+		if cmd == nil {
+			t.Fatalf("attempt %d: no check was scheduled", attempt)
+		}
+
+		m, cmd = m.Update(tracePollMsg{err: errors.New("dial tcp: lookup cloudflare.com: i/o timeout")})
+
+		if attempt < maxTraceChecks {
+			if cmd == nil {
+				t.Fatalf("attempt %d failed and polling stopped, want it to continue", attempt)
+			}
+		} else if cmd != nil {
+			t.Errorf("attempt %d: polling continued past the budget", attempt)
+		}
+	}
+
+	if m.attempts != maxTraceChecks {
+		t.Errorf("attempts = %d, want %d: each failure should consume one attempt", m.attempts, maxTraceChecks)
+	}
+}
+
+func TestFailedCheckIsRecordedAsUnknown(t *testing.T) {
+	m := NewPauseModel(NewTheme(false), "warp", cannedCheck(trace.Result{}, errors.New("i/o timeout")))
+	m, _ = m.Update(beginCheckMsg{})
+	m, _ = m.Update(tracePollMsg{err: errors.New("i/o timeout")})
+
+	view := m.View()
+	if !strings.Contains(view, "could not be reached") {
+		t.Errorf("a failed check should be explained:\n%s", view)
+	}
+	if strings.Contains(view, "warp=off") {
+		t.Error("a failed check must not be reported as warp=off")
+	}
+}
+
+// A manual re-check is a fresh budget, not another attempt against one already
+// spent, which is what produced the nonsensical "checked 6/5 times".
+func TestManualRecheckResetsTheBudget(t *testing.T) {
+	m := NewPauseModel(NewTheme(false), "warp", cannedCheck(warpOff(), nil))
+
+	// Spend the whole budget.
+	for range maxTraceChecks {
+		m, _ = m.Update(beginCheckMsg{})
+		m, _ = m.Update(tracePollMsg{result: warpOff()})
+	}
+	if m.attempts != maxTraceChecks {
+		t.Fatalf("attempts = %d, want %d", m.attempts, maxTraceChecks)
+	}
+
+	m, cmd := m.Update(key("r"))
+	if cmd == nil {
+		t.Fatal("r did not schedule a check")
+	}
+	if m.attempts != 1 {
+		t.Errorf("attempts after a manual re-check = %d, want 1", m.attempts)
+	}
+	if !strings.Contains(m.View(), "checked 1/") {
+		t.Errorf("view = %q, want the counter reset", m.View())
+	}
+}
+
+func TestAttemptCounterNeverExceedsTheLimit(t *testing.T) {
+	m := NewPauseModel(NewTheme(false), "warp", cannedCheck(warpOff(), nil))
+
+	// Hammer the manual re-check far past the budget.
+	for range maxTraceChecks * 3 {
+		m, _ = m.Update(key("r"))
+	}
+
+	if strings.Contains(m.View(), "checked 6/5") || strings.Contains(m.View(), "checked 16/5") {
+		t.Errorf("the counter ran past its own limit:\n%s", m.View())
+	}
+	if !strings.Contains(m.View(), "checked 1/5") {
+		t.Errorf("view = %q, want the reset counter", m.View())
+	}
+}
+
+// A failing check takes up to ten seconds. Showing only the stale result made
+// that look like a frozen program.
+func TestCheckingIndicatorShowsWhileACheckIsInFlight(t *testing.T) {
+	m := NewPauseModel(NewTheme(false), "warp", cannedCheck(warpOff(), nil))
+
+	// First check: in flight, nothing known yet.
+	m, _ = m.Update(beginCheckMsg{})
+	if !m.checking {
+		t.Fatal("checking = false while the first check is in flight")
+	}
+	if !strings.Contains(m.View(), "checking the WARP state") {
+		t.Errorf("no progress indicator on the first check:\n%s", m.View())
+	}
+
+	// The result arrives, and a retry timer is scheduled. No request is in
+	// flight at this point, so the indicator is correctly absent.
+	m, _ = m.Update(tracePollMsg{result: warpOff()})
+	if m.checking {
+		t.Error("checking = true although only a timer is pending")
+	}
+	if !strings.Contains(m.View(), "state:") {
+		t.Errorf("the result is not shown:\n%s", m.View())
+	}
+
+	// The timer fires and a second request goes out. Now the previous state and
+	// an in-flight indicator must both be visible, because the request can take
+	// ten seconds and a frozen screen looks like a hang.
+	m, _ = m.Update(pollTickMsg{})
+	if !m.checking {
+		t.Fatal("checking = false while the second check is in flight")
+	}
+	view := m.View()
+	if !strings.Contains(view, "checking the WARP state") {
+		t.Errorf("no progress indicator during a retry:\n%s", view)
+	}
+	if !strings.Contains(view, "state:") {
+		t.Errorf("the last known state should stay on screen during a retry:\n%s", view)
+	}
+}
+
+// When the budget is spent the screen must say so, and say what to do.
+func TestExhaustedBudgetTellsTheUserWhatToDo(t *testing.T) {
+	m := NewPauseModel(NewTheme(false), "warp", cannedCheck(warpOff(), nil))
+	for range maxTraceChecks {
+		m, _ = m.Update(beginCheckMsg{})
+		m, _ = m.Update(tracePollMsg{result: warpOff()})
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "stopped checking") {
+		t.Errorf("the spent budget is not explained:\n%s", view)
+	}
+	if !strings.Contains(view, "press r") || !strings.Contains(view, "f to measure anyway") {
+		t.Errorf("the screen does not say what to do next:\n%s", view)
+	}
+
+	// Once the user overrides, the hint is noise.
+	m, _ = m.Update(key("f"))
+	if strings.Contains(m.View(), "stopped checking") {
+		t.Error("the hint should disappear once the user has overridden")
+	}
+}

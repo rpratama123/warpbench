@@ -22,8 +22,20 @@ import (
 	"time"
 )
 
-// DefaultURL is the trace endpoint.
+// DefaultURL is the canonical trace endpoint.
 const DefaultURL = "https://cloudflare.com/cdn-cgi/trace"
+
+// FallbackURL serves the same document from the resolver address itself.
+//
+// It exists because this check matters most at the moment WARP is being
+// switched on, which is also when the resolver is being reconfigured and a
+// hostname lookup can fail. A user reported exactly that: "lookup
+// cloudflare.com: i/o timeout" on the pause screen. The address endpoint needs
+// no DNS and returns an identical field set.
+//
+// It is the fallback rather than the default because some ISPs block 1.1.1.1
+// outright, and cloudflare.com is the path less likely to be interfered with.
+const FallbackURL = "https://1.1.1.1/cdn-cgi/trace"
 
 // maxBodyBytes bounds the response. The real document is a couple of hundred
 // bytes; anything much larger is not the trace endpoint.
@@ -75,6 +87,12 @@ type Result struct {
 
 	// Raw is the full response body, so a field not yet parsed is not lost.
 	Raw string
+
+	// Source is the URL this reading came from. It differs from the canonical
+	// endpoint only when the fallback was needed, which is worth knowing.
+	Source string
+	// Fallback records that the canonical hostname could not be reached.
+	Fallback bool
 }
 
 // Doer is the subset of http.Client this package needs.
@@ -82,11 +100,15 @@ type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Fetch reads the trace endpoint once.
+// Fetch reads the trace endpoint, falling back to a DNS-free address if the
+// canonical hostname cannot be reached.
 //
 // A transport failure is returned as an error; the caller decides whether that
 // is fatal (it usually is not, but it must be recorded).
 func Fetch(ctx context.Context, doer Doer, url, stage string) (Result, error) {
+	// An explicit endpoint is the caller's choice and must not be
+	// second-guessed by a silent substitution.
+	explicit := url != "" && url != DefaultURL
 	if url == "" {
 		url = DefaultURL
 	}
@@ -94,9 +116,30 @@ func Fetch(ctx context.Context, doer Doer, url, stage string) (Result, error) {
 		doer = &http.Client{Timeout: 10 * time.Second}
 	}
 
+	result, err := fetchOnce(ctx, doer, url, stage)
+	if err == nil || explicit {
+		return result, err
+	}
+
+	// The canonical hostname failed. The most likely cause is the one this
+	// check exists to survive: the resolver being reconfigured while WARP is
+	// switched on, where a hostname lookup times out but an address still
+	// works.
+	fallback, fallbackErr := fetchOnce(ctx, doer, FallbackURL, stage)
+	if fallbackErr == nil {
+		fallback.Fallback = true
+		return fallback, nil
+	}
+
+	// Both failed. The canonical failure is the more useful of the two.
+	return result, err
+}
+
+// fetchOnce performs a single attempt against one endpoint.
+func fetchOnce(ctx context.Context, doer Doer, url, stage string) (Result, error) {
 	// Default to unknown rather than the zero value: if the fetch fails before
 	// parsing, the state is genuinely unknown, and "" is not a valid state.
-	result := Result{Stage: stage, At: time.Now(), Warp: StateUnknown}
+	result := Result{Stage: stage, At: time.Now(), Warp: StateUnknown, Source: url}
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -206,6 +249,9 @@ func (r Result) Describe() string {
 		return "trace failed: " + r.Err
 	}
 	parts := []string{"warp=" + string(r.Warp)}
+	if r.Fallback {
+		parts = append(parts, "via-fallback")
+	}
 	if r.Colo != "" {
 		parts = append(parts, "colo="+r.Colo)
 	}

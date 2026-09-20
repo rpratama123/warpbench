@@ -84,11 +84,17 @@ func (m PauseModel) Update(msg tea.Msg) (PauseModel, tea.Cmd) {
 		m.checking = false
 		if msg.err != nil {
 			m.result = trace.Result{Stage: "warp-check", Warp: trace.StateUnknown, Err: msg.err.Error()}
-			return m, nil
+		} else {
+			m.result = msg.result
 		}
-		m.result = msg.result
-		// Keep polling while WARP is not on and attempts remain, so turning it
-		// on is noticed without the user doing anything.
+
+		// Keep polling while WARP is not on and the budget allows, whether the
+		// last attempt succeeded or failed.
+		//
+		// Scheduling the retry only on success was a bug with the worst
+		// possible timing: the moment WARP is switched on is when the resolver
+		// is being reconfigured and a check is most likely to fail, and one
+		// failure ended automatic retrying for the rest of the run.
 		if !m.result.WarpEnabled() && m.attempts < maxTraceChecks {
 			return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return pollTickMsg{} })
 		}
@@ -106,6 +112,7 @@ func (m PauseModel) Update(msg tea.Msg) (PauseModel, tea.Cmd) {
 
 		case "r":
 			m.message = ""
+			m.attempts = 0
 			return m, m.startCheck()
 
 		case "f":
@@ -136,10 +143,13 @@ func (m PauseModel) View() string {
 
 	// The observed state is the headline, not a footnote: it is the thing the
 	// user needs to trust.
-	switch {
-	case m.checking && m.result.Warp == "":
+	// The last known state stays on screen, with a progress line while another
+	// check is in flight. Showing the stale result alone made a ten-second
+	// timeout look like a frozen program.
+	if m.checking {
 		b.WriteString(fitLine(m.theme.Dim("checking the WARP state..."), width) + "\n")
-	default:
+	}
+	if m.result.Warp != "" {
 		appendWrapped(&b, "state: "+m.theme.Header(m.result.Describe()), width)
 		if m.result.WarpEnabled() {
 			b.WriteString(fitLine(m.theme.Better("WARP is on. Press enter to measure again."), width) + "\n")
@@ -160,7 +170,15 @@ func (m PauseModel) View() string {
 		b.WriteString("\n" + fitLine(m.theme.Warn(m.message), width) + "\n")
 	}
 
-	fmt.Fprintf(&b, "\n%s\n", fitLine(m.theme.Dim(fmt.Sprintf("checked %d/%d times", m.attempts, maxTraceChecks)), width))
+	attempts := m.attempts
+	if attempts > maxTraceChecks {
+		attempts = maxTraceChecks
+	}
+	fmt.Fprintf(&b, "\n%s\n", fitLine(m.theme.Dim(fmt.Sprintf("checked %d/%d times", attempts, maxTraceChecks)), width))
+
+	if !m.result.WarpEnabled() && !m.Force && m.attempts >= maxTraceChecks {
+		b.WriteString(fitLine(m.theme.Warn("stopped checking. press r to keep trying, or f to measure anyway."), width) + "\n")
+	}
 	b.WriteString(fitLine(m.theme.Dim("enter continue  r re-check  f override  q quit"), width))
 
 	return b.String()
