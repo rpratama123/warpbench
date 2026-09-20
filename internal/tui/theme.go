@@ -24,6 +24,8 @@ import (
 // substantial share of terminals, CI logs and pasted issues have none.
 type Theme struct {
 	colour   bool
+	unicode  bool
+	glyphs   Glyphs
 	renderer *lipgloss.Renderer
 }
 
@@ -45,21 +47,41 @@ func ColourEnabled(noColourFlag bool) bool {
 	return true
 }
 
-// NewTheme returns a theme with colour on or off.
+// NewTheme returns a theme with colour on or off, and with the character set
+// chosen for the terminal this process is actually talking to.
+func NewTheme(colour bool) Theme {
+	return NewThemeWithGlyphs(colour, unicodeEnabled())
+}
+
+// NewThemeWithGlyphs is NewTheme with the character set forced, so both
+// variants can be rendered on any platform -- which is what makes the fallback
+// testable on a machine that is not Windows.
 //
 // The colour profile is set explicitly rather than left to lipgloss's
 // detection. Detection answers "what can this output do", and a caller that has
 // already decided must not have that decision silently overridden -- which is
 // exactly what happens when output is a pipe or a test buffer.
-func NewTheme(colour bool) Theme {
+func NewThemeWithGlyphs(colour, unicode bool) Theme {
 	renderer := lipgloss.NewRenderer(os.Stdout)
 	if colour {
 		renderer.SetColorProfile(termenv.ANSI256)
 	} else {
 		renderer.SetColorProfile(termenv.Ascii)
 	}
-	return Theme{colour: colour, renderer: renderer}
+
+	glyphs := ASCIIGlyphs
+	if unicode {
+		glyphs = UnicodeGlyphs
+	}
+
+	return Theme{colour: colour, unicode: unicode, glyphs: glyphs, renderer: renderer}
 }
+
+// Glyphs returns the character set this theme draws with.
+func (t Theme) Glyphs() Glyphs { return t.glyphs }
+
+// Unicode reports whether this theme may use the block and arrow characters.
+func (t Theme) Unicode() bool { return t.unicode }
 
 // Header is used for titles and section headings.
 func (t Theme) Header(s string) string {

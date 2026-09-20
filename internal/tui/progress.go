@@ -261,12 +261,15 @@ func (m ProgressModel) View() string {
 
 // renderServer draws one live row.
 func (m ProgressModel) renderServer(sp serverProgress) string {
+	// "·" is left alone: unlike the block and arrow characters it exists in
+	// every single-byte code page this tool is likely to meet, so it is not
+	// part of the glyph set that has to fall back.
 	marker := "·"
 	switch {
 	case sp.done:
-		marker = "✓"
+		marker = m.theme.Glyphs().Done
 	case sp.step != "":
-		marker = "▶"
+		marker = m.theme.Glyphs().Running
 	}
 
 	cells := []string{}

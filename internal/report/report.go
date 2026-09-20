@@ -96,7 +96,7 @@ func writeSummary(b *strings.Builder, cmp *results.Comparison) {
 	b.WriteString("\n\n")
 	b.WriteString("Charts are zero-based and share one scale within a section. A large")
 	b.WriteString(" relative change and a small absolute one can therefore look similar, so")
-	b.WriteString(" the Δ column, not the bar length, is the precise figure.\n\n")
+	b.WriteString(" the Delta column, not the bar length, is the precise figure.\n\n")
 }
 
 func writePhases(b *strings.Builder, cmp *results.Comparison) {
@@ -134,7 +134,7 @@ func writeMetrics(b *strings.Builder, cmp *results.Comparison, opts Options) {
 		}
 
 		fmt.Fprintf(b, "## %s\n\n", metric.Title)
-		fmt.Fprintf(b, "| Server | ISP%s | WARP%s | Δ | Δ%% | Verdict |\n", metric.Unit, metric.Unit)
+		fmt.Fprintf(b, "| Server | ISP%s | WARP%s | Delta | Delta%% | Verdict |\n", metric.Unit, metric.Unit)
 		b.WriteString("|---|---:|---:|---:|---:|---|\n")
 
 		for _, d := range comparable {

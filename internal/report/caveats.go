@@ -70,9 +70,9 @@ func collectCaveats(cmp *results.Comparison) []caveat {
 
 	if ids := serversWithFlag(both, "control:domestic"); len(ids) > 0 {
 		caveats = append(caveats, caveat{
-			Title: "Domestic controls",
+			Title: "Domestic controls do not isolate international transit",
 			Body: fmt.Sprintf(
-				"These sit on the domestic path: %s. WARP is not expected to improve them, and they are included precisely so a reader can see that any improvement elsewhere is specific to international transit rather than a general uplift.",
+				"These sit on the domestic path: %s. They are not a clean control for \"international transit\", because a domestic target on a different network still leaves this ISP's network and is reached over the same off-net peering as an international one. Read any improvement on them as evidence that the congestion is in off-net peering generally rather than in international transit alone; only a target served inside the ISP's own network can be expected to stay flat.",
 				joinIDs(ids)),
 		})
 	}
@@ -95,6 +95,15 @@ func collectCaveats(cmp *results.Comparison) []caveat {
 			Title: "Latency measured by TCP connect, not ICMP",
 			Body: fmt.Sprintf(
 				"ICMP was unavailable on these targets, so their latency is TCP connect time to port 443: %s. That is a different quantity measured at a different layer, and it is not comparable with the ICMP rows above it, nor with any other run's ICMP results.",
+				joinIDs(ids)),
+		})
+	}
+
+	if ids := silentProbes(cmp); len(ids) > 0 {
+		caveats = append(caveats, caveat{
+			Title: "Latency probes that answered nothing",
+			Body: fmt.Sprintf(
+				"These targets were probed in both phases and never replied: %s. They are absent from the latency, jitter and loss tables rather than shown as 0.0 ms or 100%% loss, because a probe that receives nothing has not measured a latency. The probe is a TCP connect to port 443, and a target that does not listen there is silent for a reason unrelated to the path. Their throughput rows are unaffected.",
 				joinIDs(ids)),
 		})
 	}
@@ -165,6 +174,38 @@ func collectCaveats(cmp *results.Comparison) []caveat {
 	}
 
 	return caveats
+}
+
+// silentProbes returns the ids whose latency probe was sent in both phases and
+// never received a single reply.
+//
+// Absence is not zero. These targets answered nothing on port 443, so the
+// report shows them as unmeasured rather than as a latency of 0.0 ms or a loss
+// of 100%, either of which would be a claim about the path that was never
+// observed.
+//
+// A target that answered in one phase and not the other is a different and
+// important finding -- WARP making a host unreachable, or restoring it -- so it
+// is deliberately excluded here and surfaces through the normal one-sided
+// path that names it under "Not measured in both phases".
+func silentProbes(cmp *results.Comparison) []string {
+	base := cmp.Baseline.ServerByID()
+	warp := cmp.Warp.ServerByID()
+
+	var out []string
+	for id, b := range base {
+		w, ok := warp[id]
+		if !ok {
+			continue
+		}
+		if b.Ping == nil || w.Ping == nil {
+			continue
+		}
+		if b.Ping.Sent > 0 && w.Ping.Sent > 0 && b.Ping.Received == 0 && w.Ping.Received == 0 {
+			out = append(out, id)
+		}
+	}
+	return dedupeSorted(out)
 }
 
 // phaseWarpEnabled reports whether a phase actually ran over WARP.

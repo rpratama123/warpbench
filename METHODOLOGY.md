@@ -77,6 +77,12 @@ different layer; it is never presented as, or compared with, an ICMP round trip.
 On Linux, unprivileged ICMP requires `net.ipv4.ping_group_range` to include your
 group; the tool prints the fix and does not apply it.
 
+**Statistics exist only where a reply exists.** A probe run that received nothing
+is not a latency of zero — it is the absence of a measurement, and the two are
+never conflated. Such a target is named in the report's caveats instead of
+appearing as `0.0 ms`, which would also drag any median towards "no change".
+See §4.3.
+
 ### 4.2 Jitter
 
 Two definitions are reported, because they disagree in an informative way:
@@ -97,6 +103,18 @@ measurement window, not a sample drawn from a larger population.
 Probes sent against replies received, as a percentage. A run where every probe
 was lost is a successful measurement of 100% loss, not an error — total loss is a
 finding, and is reported as one.
+
+**The exception is a target that answers nothing in either phase.** Zero replies
+to a TCP-connect probe means either that the path dropped everything or that
+nothing is listening on the probe port, and the two are indistinguishable from
+the result. Such a target is named as unmeasured rather than charted as 100%
+against 100%, which would read as a finding about the path when it is a fact
+about the probe. Latency, jitter and loss are all withheld together for the same
+reason: none of them exists without a reply.
+
+When exactly one phase received replies, that asymmetry is a real finding — WARP
+making a host unreachable, or restoring it — and the target is named under "Not
+measured in both phases" rather than silently dropped.
 
 ### 4.4 Connection setup
 
@@ -214,9 +232,12 @@ These are printed in the report itself, next to the numbers, not buried here.
 - **Best-effort targets.** Community-run and provider-run public endpoints can be
   busy, rate-limited or retired without notice. A missing or anomalous row is
   more likely to be the target than the path.
-- **Domestic controls are not expected to improve.** Targets on the domestic
-  path are included precisely so a reader can see that an improvement elsewhere
-  is specific to international transit rather than a general uplift.
+- **Domestic controls do not isolate international transit.** A target on the
+  domestic path but on a *different* network still leaves this ISP's network, so
+  it is reached over the same off-net peering as an international one. An
+  improvement on it is evidence that the congestion is in off-net peering
+  generally rather than in international transit alone. Only a target served
+  inside the ISP's own network can be expected to stay flat.
 - **Public IPs are masked by default** to their network prefix. `--no-mask`
   discloses them.
 - **A single run is a single sample of a path that varies.** Nothing here

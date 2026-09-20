@@ -8,14 +8,15 @@ import (
 
 // fixture returns a comparison rich enough to exercise every section: edge and
 // best-effort targets, a domestic control, an ICMP substitution, a one-sided
-// metric, and a phase whose WARP state changed.
+// metric, a phase whose WARP state changed, and a target whose latency probe
+// never answers.
 func fixture() *results.Comparison {
 	at := time.Date(2026, 9, 20, 8, 0, 0, 0, time.FixedZone("WIB", 7*3600))
 	warpAt := at.Add(12 * time.Minute)
 
 	cfg := results.Configuration{
 		Mode: "quick", Groups: []string{"id", "sg", "eu"},
-		ServerIDs: []string{"id-cf-cgk", "sg-linode", "eu-ls-amsterdam"},
+		ServerIDs: []string{"id-cf-cgk", "id-myrepublic-iperf3", "sg-linode", "eu-ls-amsterdam"},
 		Parallel:  1, Masked: true,
 		DownloadSecs: 12, UploadSecs: 8, DownloadRuns: 1, UploadRuns: 1,
 		PingCount: 10, TimingRuns: 3, WarmupSecs: 1,
@@ -34,6 +35,20 @@ func fixture() *results.Comparison {
 			Upload: &results.Series{Metric: "upload", Parallel: 1, MedianSteadyMbps: 9.8,
 				Samples: []results.Sample{{Bytes: 1, ElapsedMs: 8000, SteadyMbps: 9.8, Proto: "HTTP/1.1"}}},
 			Warnings: []string{},
+		},
+		{
+			ID: "id-myrepublic-iperf3", Name: "MyRepublic Jakarta", Group: "id", Protocol: "iperf3",
+			City: "Jakarta", Country: "ID", ResolvedIP: "103.10.60.5:5201",
+			Flags: []string{"best-effort", "control:domestic"},
+			// This target answers on 5201, not on the 443 the latency probe
+			// dials, so it replies to nothing in either phase. That is the case
+			// the report must show as unmeasured rather than as 0.0 ms.
+			Ping: &results.Ping{Method: "tcp", Target: "speedtest.myrepublic.invalid:443",
+				Sent: 10, Received: 0, LossPct: 100,
+				Warning: "ICMP unavailable, so latency is TCP connect time to port 443."},
+			Download: &results.Series{Metric: "download", Parallel: 1, MedianSteadyMbps: 4.81,
+				Samples: []results.Sample{{Bytes: 1, ElapsedMs: 12000, SteadyMbps: 4.81, Undersized: true, Proto: "HTTP/1.1"}}},
+			Warnings: []string{"upload: no usable samples"},
 		},
 		{
 			ID: "sg-linode", Name: "Linode Singapore", Group: "sg", Protocol: "http-file",
@@ -65,6 +80,21 @@ func fixture() *results.Comparison {
 				Samples: []results.Sample{{Bytes: 1, ElapsedMs: 12000, SteadyMbps: 118.4, Proto: "HTTP/1.1"}}},
 			Upload: &results.Series{Metric: "upload", Parallel: 1, MedianSteadyMbps: 96.1,
 				Samples: []results.Sample{{Bytes: 1, ElapsedMs: 8000, SteadyMbps: 96.1, Proto: "HTTP/1.1"}}},
+			Warnings: []string{},
+		},
+		{
+			ID: "id-myrepublic-iperf3", Name: "MyRepublic Jakarta", Group: "id", Protocol: "iperf3",
+			City: "Jakarta", Country: "ID", ResolvedIP: "103.10.60.5:5201",
+			Flags: []string{"best-effort", "control:domestic"},
+			// The same silent probe as the baseline: this is the target that
+			// must not be turned into a 0.0 ms latency row.
+			Ping: &results.Ping{Method: "tcp", Target: "speedtest.myrepublic.invalid:443",
+				Sent: 10, Received: 0, LossPct: 100,
+				Warning: "ICMP unavailable, so latency is TCP connect time to port 443."},
+			Download: &results.Series{Metric: "download", Parallel: 1, MedianSteadyMbps: 210.1,
+				Samples: []results.Sample{{Bytes: 1, ElapsedMs: 12000, SteadyMbps: 210.1, Proto: "HTTP/1.1"}}},
+			Upload: &results.Series{Metric: "upload", Parallel: 1, MedianSteadyMbps: 4.9,
+				Samples: []results.Sample{{Bytes: 1, ElapsedMs: 8000, SteadyMbps: 4.9, Proto: "HTTP/1.1"}}},
 			Warnings: []string{},
 		},
 		{

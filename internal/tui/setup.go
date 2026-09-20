@@ -359,25 +359,41 @@ func (m SetupModel) groupName(id string) string {
 	return id
 }
 
+// help is the long and short form of the same hint.
+type help struct {
+	long, short string
+}
+
 // Help text is offered in two lengths: the long form is friendlier, and the
 // short form keeps the help from becoming the thing that overflows a narrow
-// terminal.
-const (
-	modeFooterLong  = "↑/↓ choose  enter next  q quit"
-	modeFooterShort = "↑↓ choose  enter next  q quit"
-	listFooterLong  = "↑/↓ move  space toggle  a group  A all  n none  ←/→ collapse  enter start  backspace mode  q quit"
-	listFooterShort = "↑↓ move  space toggle  enter start  q quit"
-)
+// terminal. The arrow glyphs come from the theme, so help on a console that
+// cannot draw them says "^/v choose" rather than "?/? choose".
+func (m SetupModel) modeHelp() help {
+	g := m.theme.Glyphs()
+	return help{
+		long:  g.Up + "/" + g.Down + " choose  enter next  q quit",
+		short: g.Up + g.Down + " choose  enter next  q quit",
+	}
+}
+
+func (m SetupModel) listHelp() help {
+	g := m.theme.Glyphs()
+	return help{
+		long: g.Up + "/" + g.Down + " move  space toggle  a group  A all  n none  " +
+			g.Left + "/" + g.Right + " collapse  enter start  backspace mode  q quit",
+		short: g.Up + g.Down + " move  space toggle  enter start  q quit",
+	}
+}
 
 // fitFooter picks the longest help text that fits.
-func fitFooter(width int, long, short string) string {
-	if len([]rune(long)) <= width {
-		return long
+func fitFooter(width int, h help) string {
+	if len([]rune(h.long)) <= width {
+		return h.long
 	}
-	if len([]rune(short)) <= width {
-		return short
+	if len([]rune(h.short)) <= width {
+		return h.short
 	}
-	return fitLine(short, width)
+	return fitLine(h.short, width)
 }
 
 // View renders the current stage.
@@ -413,7 +429,7 @@ func (m SetupModel) viewMode() string {
 	}
 
 	b.WriteString("\n" + fitLine(m.theme.Dim("A full comparison runs this twice, once per phase."), width) + "\n\n")
-	b.WriteString(fitLine(m.theme.Dim(fitFooter(width, modeFooterLong, modeFooterShort)), width))
+	b.WriteString(fitLine(m.theme.Dim(fitFooter(width, m.modeHelp())), width))
 	return b.String()
 }
 
@@ -450,7 +466,7 @@ func (m SetupModel) viewServers() string {
 	if len(selected) == 0 {
 		b.WriteString(fitLine(m.theme.Warn("select at least one server"), width) + "\n")
 	}
-	b.WriteString(fitLine(m.theme.Dim(fitFooter(width, listFooterLong, listFooterShort)), width))
+	b.WriteString(fitLine(m.theme.Dim(fitFooter(width, m.listHelp())), width))
 	return b.String()
 }
 
@@ -470,9 +486,9 @@ func (m SetupModel) renderRow(row setupRow) string {
 				on++
 			}
 		}
-		marker := "▾"
+		marker := m.theme.Glyphs().Expanded
 		if m.collapsed[row.groupID] {
-			marker = "▸"
+			marker = m.theme.Glyphs().Collapsed
 		}
 		state := " "
 		if on == len(servers) {

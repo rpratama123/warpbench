@@ -125,17 +125,29 @@ func TestAllZeroRowsDoNotDivideByZero(t *testing.T) {
 
 // A shortened label must look shortened, or it reads as a different server.
 func TestLongLabelsAreTruncatedVisibly(t *testing.T) {
-	lines := Render([]Row{{
+	row := []Row{{
 		Label:  "a-very-long-server-identifier-that-will-not-fit",
 		Series: []Series{{Name: "ISP", Value: 1, Suffix: " Mbps"}},
-	}}, Options{Width: 40})
+	}}
 
-	line := lines[0]
-	if !strings.Contains(line, "…") {
-		t.Errorf("line = %q, want a truncation marker", line)
-	}
-	if Width(line) > 40 {
-		t.Errorf("line is %d columns, want at most 40", Width(line))
+	for _, tc := range []struct {
+		name  string
+		chars Chars
+		want  string
+	}{
+		{"unicode", Unicode, "…"},
+		{"ascii", ASCII, "..."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := Render(row, Options{Width: 40, Chars: tc.chars})
+			line := lines[0]
+			if !strings.Contains(line, tc.want) {
+				t.Errorf("line = %q, want the %q truncation marker", line, tc.want)
+			}
+			if Width(line) > 40 {
+				t.Errorf("line is %d columns, want at most 40", Width(line))
+			}
+		})
 	}
 }
 
@@ -249,17 +261,49 @@ func TestRuneLenAndTruncate(t *testing.T) {
 	if got := runeLen("abc"); got != 3 {
 		t.Errorf("runeLen = %d", got)
 	}
-	if got := truncate("abcdef", 4); got != "abc…" {
+	if got := truncate("abcdef", 4, Unicode); got != "abc…" {
 		t.Errorf("truncate = %q, want abc…", got)
 	}
-	if got := truncate("abc", 10); got != "abc" {
+	if got := truncate("abcdef", 4, ASCII); got != "a..." {
+		t.Errorf("ASCII truncate = %q, want a... (marker reserved at its own width)", got)
+	}
+	if got := truncate("abc", 10, Unicode); got != "abc" {
 		t.Errorf("truncate should not pad: %q", got)
 	}
-	if got := truncate("abc", 0); got != "" {
+	if got := truncate("abc", 0, Unicode); got != "" {
 		t.Errorf("truncate to 0 = %q", got)
 	}
-	if got := truncate("abc", 1); got != "a" {
+	if got := truncate("abc", 1, Unicode); got != "a" {
 		t.Errorf("truncate to 1 = %q", got)
+	}
+	// A hand-built character set without an ellipsis keeps the old rendering.
+	if got := truncate("abcdef", 4, Chars{Full: "#", Empty: "."}); got != "abc…" {
+		t.Errorf("zero-value ellipsis = %q, want abc…", got)
+	}
+}
+
+// The ASCII set is what the Markdown report is written with, and that report is
+// saved, mailed and pasted by readers on every platform. If a non-ASCII
+// character reaches it, a reader on a legacy code page loses it silently.
+func TestASCIICharsAreActuallyASCII(t *testing.T) {
+	rows := []Row{{
+		Label: "a-very-long-server-identifier-indeed",
+		Series: []Series{
+			{Name: "ISP", Value: 41.2, Suffix: " Mbps"},
+			{Name: "WARP", Value: 118.4, Suffix: " Mbps"},
+		},
+		Note: "+187%  better",
+	}}
+
+	for _, width := range []int{12, 20, 40, 72, 200} {
+		lines := Render(rows, Options{Width: width, Chars: ASCII})
+		for _, line := range lines {
+			for _, r := range line {
+				if r > 127 {
+					t.Fatalf("ASCII chart at width %d emitted %q (U+%04X): %q", width, r, r, line)
+				}
+			}
+		}
 	}
 }
 

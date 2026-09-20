@@ -101,7 +101,9 @@ func (m ResultsModel) chars() chart.Chars {
 	if m.plain {
 		return chart.ASCII
 	}
-	return chart.Unicode
+	// The theme already resolved whether this terminal can draw the block
+	// characters; falling back is not a decision for the results screen.
+	return m.theme.Glyphs().Chart
 }
 
 // View renders the current page.
@@ -150,7 +152,8 @@ func (m ResultsModel) View() string {
 
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "%s\n", fitLine(m.theme.Dim(fmt.Sprintf("page %d/%d  (%s)", m.page+1, len(pages), strings.Join(pageNames(), " · "))), width))
-	b.WriteString(fitLine(m.theme.Dim("←/→ page  enter finish  q quit"), width))
+	g := m.theme.Glyphs()
+	b.WriteString(fitLine(m.theme.Dim(g.Left+"/"+g.Right+" page  enter finish  q quit"), width))
 
 	return b.String()
 }

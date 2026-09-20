@@ -333,17 +333,30 @@ func throughputDelta(metric string, a, b *Series) *Delta {
 	return &d
 }
 
+// latencyDelta, jitterDelta and lossDelta all gate on HasRTT rather than on the
+// ping being present at all. A ping that got no reply is present in the file
+// and full of zeroes, and treating those zeroes as measurements would put a
+// fabricated 0.0 ms into the latency column and a fabricated +0.00 into the
+// summary's median.
+//
+// Gating all three on the same test keeps the phases honest in the direction
+// that matters: if the target answered in one phase and not the other, the
+// delta is one-sided, Comparable is false, and the server is named under "Not
+// measured in both phases" rather than quietly dropped. A target that went
+// unreachable under WARP is therefore still reported.
 func latencyDelta(a, b *Ping) *Delta {
-	d := computeDelta("latency_avg", LowerIsBetter, pingAvg(a), a != nil, pingAvg(b), b != nil)
-	return &d
+	return deltaPtr(computeDelta("latency_avg", LowerIsBetter,
+		pingAvg(a), a.HasRTT(), pingAvg(b), b.HasRTT()))
 }
 
 func jitterDelta(a, b *Ping) *Delta {
-	return deltaPtr(computeDelta("jitter", LowerIsBetter, pingJitter(a), a != nil, pingJitter(b), b != nil))
+	return deltaPtr(computeDelta("jitter", LowerIsBetter,
+		pingJitter(a), a.HasRTT(), pingJitter(b), b.HasRTT()))
 }
 
 func lossDelta(a, b *Ping) *Delta {
-	return deltaPtr(computeDelta("loss", LowerIsBetter, pingLoss(a), a != nil, pingLoss(b), b != nil))
+	return deltaPtr(computeDelta("loss", LowerIsBetter,
+		pingLoss(a), a.HasRTT(), pingLoss(b), b.HasRTT()))
 }
 
 func ttfbDelta(a, b *Timings) *Delta {

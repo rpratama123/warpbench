@@ -20,14 +20,22 @@ import (
 type Chars struct {
 	Full  string
 	Empty string
+	// Ellipsis marks a label or line cut short. It travels with the rest of
+	// the set because a caller that needs output which survives a legacy
+	// code page needs the whole thing in ASCII, and an ellipsis is not one.
+	Ellipsis string
 }
 
 // ASCII is the fallback: no block or box-drawing characters, so the output
 // survives any terminal, any font, and a paste into a GitHub issue.
-var ASCII = Chars{Full: "#", Empty: "."}
+var ASCII = Chars{Full: "#", Empty: ".", Ellipsis: "..."}
 
 // Unicode uses block characters, for terminals that can be trusted with them.
-var Unicode = Chars{Full: "█", Empty: "░"}
+var Unicode = Chars{Full: "█", Empty: "░", Ellipsis: "…"}
+
+// defaultEllipsis is used when a caller supplies a character set without one,
+// so a hand-built Chars keeps the historical rendering.
+const defaultEllipsis = "…"
 
 // Options controls rendering.
 type Options struct {
@@ -49,6 +57,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Chars.Full == "" {
 		o.Chars = ASCII
+	}
+	if o.Chars.Ellipsis == "" {
+		o.Chars.Ellipsis = defaultEllipsis
 	}
 	if o.ValueFormat == nil {
 		o.ValueFormat = func(v float64) string { return trimFloat(v) }
@@ -135,7 +146,7 @@ func Render(rows []Row, opts Options) []string {
 		for i, s := range row.Series {
 			label := ""
 			if i == 0 {
-				label = truncate(row.Label, labelWidth)
+				label = truncate(row.Label, labelWidth, opts.Chars)
 			}
 
 			var seriesName string
@@ -156,7 +167,7 @@ func Render(rows []Row, opts Options) []string {
 				withNote = line + "  " + note
 			}
 
-			out = append(out, fit(line, withNote, opts.Width))
+			out = append(out, fit(line, withNote, opts.Width, opts.Chars))
 		}
 	}
 
@@ -182,30 +193,28 @@ func measure(rows []Row, opts Options) (labelWidth, seriesWidth, valueWidth, not
 // part of a line, and the whole line is truncated only when even the bare value
 // cannot fit. Wrapping is never an option: a wrapped bar line turns a chart into
 // an unreadable paragraph.
-func fit(bare, withNote string, width int) string {
+func fit(bare, withNote string, width int, chars Chars) string {
 	if withNote != "" && runeLen(withNote) <= width {
 		return withNote
 	}
 	if runeLen(bare) <= width {
 		return bare
 	}
-	return truncateLine(bare, width)
+	return truncateLine(bare, width, chars)
 }
 
 // truncateLine cuts a line to width, marking the cut when there is room for a
 // marker.
-func truncateLine(s string, width int) string {
-	r := []rune(s)
-	if len(r) <= width {
-		return s
+func truncateLine(s string, width int, chars Chars) string {
+	return truncate(s, width, chars)
+}
+
+// ellipsisFor returns the cut marker, tolerating a zero-value character set.
+func ellipsisFor(chars Chars) string {
+	if chars.Ellipsis == "" {
+		return defaultEllipsis
 	}
-	if width <= 0 {
-		return ""
-	}
-	if width == 1 {
-		return string(r[:1])
-	}
-	return string(r[:width-1]) + "…"
+	return chars.Ellipsis
 }
 
 // buildLine assembles one line without its note.
@@ -276,9 +285,16 @@ func pad(s string, width int) string {
 	return s
 }
 
-// truncate shortens to width, marking the cut with an ellipsis so a shortened
-// label is visibly shortened rather than looking like a different server.
-func truncate(s string, width int) string {
+// truncate shortens to width, marking the cut with the set's ellipsis so a
+// shortened label is visibly shortened rather than looking like a different
+// server.
+//
+// The marker is reserved at its own rune width rather than assumed to occupy
+// one column, because the ASCII set writes "..." and the chart's width contract
+// -- no line wider than the caller asked for -- has to hold for both sets. When
+// there is no room for the marker the string is cut without one, which is
+// better than overflowing the line the cut was meant to fit.
+func truncate(s string, width int, chars Chars) string {
 	if width <= 0 {
 		return ""
 	}
@@ -286,10 +302,11 @@ func truncate(s string, width int) string {
 	if len(r) <= width {
 		return s
 	}
-	if width == 1 {
-		return string(r[:1])
+	marker := []rune(ellipsisFor(chars))
+	if len(marker) == 0 || width <= len(marker) {
+		return string(r[:width])
 	}
-	return string(r[:width-1]) + "…"
+	return string(r[:width-len(marker)]) + string(marker)
 }
 
 func runeLen(s string) int { return len([]rune(s)) }

@@ -141,6 +141,18 @@ type Ping struct {
 	Warning string `json:"warning"`
 }
 
+// HasRTT reports whether the ping produced at least one reply to measure.
+//
+// A ping that received nothing is not a measurement of zero latency, it is the
+// absence of a measurement, and the two must not be confused: the probe is a
+// TCP connect to port 443, so a target that does not listen there answers
+// nothing in either phase. Reporting that as 0.0 ms, or as 100% packet loss,
+// would state something about the network that was never observed -- and
+// because the value is zero it would also drag any median towards "no change".
+func (p *Ping) HasRTT() bool {
+	return p != nil && p.Received > 0
+}
+
 // Timings is a summarised connection-setup measurement.
 type Timings struct {
 	DNSMs        float64 `json:"dns_ms"`

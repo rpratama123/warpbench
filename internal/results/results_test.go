@@ -633,3 +633,127 @@ func TestSummaryCountsThroughVerdict(t *testing.T) {
 		t.Errorf("Headline() = %q", c.Summary.Headline())
 	}
 }
+
+// silentServer is a target that was probed and never replied, which is what a
+// host that does not listen on the probe's port looks like in a result file.
+func silentServer(id string, downloadMbps float64) Server {
+	s := measuredServer(id, downloadMbps, 0)
+	s.Ping = &Ping{Method: "tcp", Target: id + ":443", Sent: 10, Received: 0, LossPct: 100}
+	return s
+}
+
+func TestPingHasRTT(t *testing.T) {
+	if (*Ping)(nil).HasRTT() {
+		t.Error("a nil ping has no RTT")
+	}
+	if (&Ping{Sent: 10, Received: 0, LossPct: 100}).HasRTT() {
+		t.Error("a ping that received nothing has no RTT, however many probes it sent")
+	}
+	if !(&Ping{Sent: 10, Received: 1}).HasRTT() {
+		t.Error("a single reply is still an RTT")
+	}
+}
+
+// A probe that never answers produces a row of zeroes, and treating those
+// zeroes as measurements invents a latency of 0.0 ms and a packet loss of 100%
+// that were never observed.
+func TestZeroReplyPingIsNotAMeasurement(t *testing.T) {
+	base := phaseFile("baseline", "2026-09-20", time.Now().Add(-10*time.Minute),
+		measuredServer("real", 100, 50), silentServer("silent", 100))
+	warp := phaseFile("warp", "2026-09-20", time.Now(),
+		measuredServer("real", 200, 40), silentServer("silent", 300))
+
+	c, err := Compare(base, warp, CompareOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byID := map[string]ServerDelta{}
+	for _, s := range c.Servers {
+		byID[s.ID] = s
+	}
+	silent := byID["silent"]
+
+	for _, m := range []struct {
+		name string
+		d    *Delta
+	}{
+		{"latency", silent.Latency},
+		{"jitter", silent.Jitter},
+		{"loss", silent.Loss},
+	} {
+		if m.d == nil {
+			t.Fatalf("%s delta is nil", m.name)
+		}
+		if m.d.HasBaseline || m.d.HasWarp {
+			t.Errorf("%s HasBaseline/HasWarp = %v/%v, want false/false: nothing was measured",
+				m.name, m.d.HasBaseline, m.d.HasWarp)
+		}
+		if m.d.Comparable() {
+			t.Errorf("%s is Comparable, want false", m.name)
+		}
+		if got := m.d.Verdict(); got != "n/a" {
+			t.Errorf("%s Verdict() = %q, want n/a", m.name, got)
+		}
+	}
+
+	// Throughput is unaffected: the target was reachable, it just does not
+	// answer the latency probe.
+	if silent.Download == nil || !silent.Download.Comparable() {
+		t.Fatal("the silent target's download should still be comparable")
+	}
+
+	// And the fabricated zeroes must not reach the summary.
+	if c.Summary.Latency.Total != 1 {
+		t.Errorf("Latency.Total = %d, want 1: the silent target is not a latency measurement",
+			c.Summary.Latency.Total)
+	}
+	if c.Summary.Latency.MedianAbs != -10 {
+		t.Errorf("Latency.MedianAbs = %v, want -10: only the real target counts",
+			c.Summary.Latency.MedianAbs)
+	}
+	if c.Summary.Loss.Total != 1 {
+		t.Errorf("Loss.Total = %d, want 1", c.Summary.Loss.Total)
+	}
+}
+
+// A target that answered in one phase and not the other is a finding, not an
+// absence: WARP making a host unreachable must still be reported.
+func TestOneSidedPingIsReportedNotDropped(t *testing.T) {
+	base := phaseFile("baseline", "2026-09-20", time.Now().Add(-10*time.Minute),
+		measuredServer("went-silent", 100, 50), silentServer("came-back", 100))
+	warp := phaseFile("warp", "2026-09-20", time.Now(),
+		silentServer("went-silent", 200), measuredServer("came-back", 200, 40))
+
+	c, err := Compare(base, warp, CompareOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byID := map[string]ServerDelta{}
+	for _, s := range c.Servers {
+		byID[s.ID] = s
+	}
+
+	gone := byID["went-silent"].Latency
+	if gone == nil || gone.Comparable() {
+		t.Fatal("a target that stopped answering under WARP must not be comparable")
+	}
+	if !gone.HasBaseline || gone.HasWarp {
+		t.Errorf("HasBaseline/HasWarp = %v/%v, want true/false", gone.HasBaseline, gone.HasWarp)
+	}
+	if gone.Note != "not measured over WARP" {
+		t.Errorf("Note = %q, want it to name the missing side", gone.Note)
+	}
+
+	back := byID["came-back"].Latency
+	if back == nil || back.Comparable() {
+		t.Fatal("a target that only answered under WARP must not be comparable")
+	}
+	if back.HasBaseline || !back.HasWarp {
+		t.Errorf("HasBaseline/HasWarp = %v/%v, want false/true", back.HasBaseline, back.HasWarp)
+	}
+	if back.Note != "not measured on the ISP path" {
+		t.Errorf("Note = %q, want it to name the missing side", back.Note)
+	}
+}
