@@ -601,6 +601,8 @@ Unsigned binaries trip SmartScreen for **browser** downloads but not for launche
 | R9 | **IPv6 silently preferred** on AAAA-first hosts | "IPv4 default" claim is false | Force `tcp4` unless `--ipv6`; record and display family + resolved IP per phase |
 | R10 | **WARP states that are not `on`** (WARP+, Zero Trust, DoH-only) | User stuck at the pause, or wrong conclusion | Explain `plus`/`gateway=`/DoH-only explicitly; refuse unless overridden; record the override |
 | R17 | **The measurement HTTP client refuses redirects, which breaks a release download** | The iperf3 binary could not be fetched (bare 302) | Asset downloads use a separate redirect-following client; the measurement client keeps refusing redirects so a sample cannot silently change host. Both are now pinned by tests. |
+| R19 | **A release created by `GITHUB_TOKEN` starts no further workflows** | A post-release verification workflow keyed on `on: release` would silently never run, so nothing would ever confirm the install path works | The release workflow calls the verification explicitly as a reusable workflow. It also means a release that fails verification reports as a failed release workflow. |
+| R20 | **Third-party CLI flags change under us** | cosign deprecated `--output-signature`/`--output-certificate` for `--bundle`, which broke a release, and goreleaser's `signature` template defaults to a filename cosign no longer writes | The release workflow preflights the flags it depends on before building, and actionlint runs in CI so a malformed workflow fails on push rather than on a tag. |
 | R18 | **Reporting measurement noise as a finding** | A 0.01 ms latency change reported as a regression destroys a published report's credibility | Deltas below a 0.5% relative threshold (0.05 pp for loss) read as "same", and the headline and the table share one `Verdict` so they cannot disagree. |
 | R11 | **`servers.json` is remote input** | Supply-chain / DoS | Schema validation, strict size limit, no code execution, embedded fallback, HTTPS only |
 | R12 | **PS 5.1 TLS defaults below 1.2** | Opaque launcher failure on older Windows | Explicit `SecurityProtocol` including `Tls12` |
@@ -662,7 +664,7 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 2. ~~Q1, Q2, Q4~~ — **answered**; see §12.
 3. Remaining optional choices **Q3** (windows/arm64 iperf3), **Q5** (licence), **Q6** (datautama mirror), **Q7** (short link). None blocks Phase 2.
 
-**All eight phases are complete.** The tool measures, compares, reports and
+**All eight phases are complete, and `v0.1.0` is published and verified.** The tool measures, compares, reports and
 releases. Further work is listed under §12 (open questions Q3, Q6, Q7) and the
 v1.1 candidates: self-built iperf3 (option B in §9.4, which would close the
 windows/arm64 gap), `brew`/`scoop` install paths, and macOS notarization.

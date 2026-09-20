@@ -1,13 +1,18 @@
 name: Verify published release
 
-# Runs after a release is published, and on demand. This is the only check that
-# exercises what a user actually does: fetch the launcher from main and let it
-# download, verify and run the binary. Everything else tests those pieces
-# separately.
-
+# The only check that exercises what a user actually does: fetch the launcher
+# from main and let it download, verify and run the binary. Everything else
+# tests those pieces separately.
+#
+# It is called by the release workflow rather than triggered by the `release`
+# event. Releases are created by goreleaser using the workflow's GITHUB_TOKEN,
+# and GitHub deliberately does not let GITHUB_TOKEN-authored events start
+# further workflow runs, so `on: release` would silently never fire. Being
+# called explicitly also means a release that fails verification reports as a
+# failed release workflow, which is where someone would look.
 on:
-  release:
-    types: [published]
+  workflow_call:
+  # Kept for re-verifying an existing release on demand.
   workflow_dispatch:
 
 permissions:

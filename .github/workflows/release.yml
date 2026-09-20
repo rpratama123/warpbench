@@ -84,3 +84,11 @@ jobs:
       # than trusting the configuration to mean what it says.
       - name: Assert the launcher asset contract
         run: bash tools/check-release-assets.sh dist
+
+  # Provenance the moment it exists: install through the documented one-liner on
+  # every platform, and verify the signature a user would verify.
+  verify:
+    needs: release
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify-release.yml
