@@ -650,7 +650,7 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 | 3 | Server list: schema, loader, cache, embedded fallback, `servers.json` v1, validation Action | **done — 74/74 checks green** |
 | 4 | Measurement: `stats`, `netprobe`, four throughput adapters incl. iperf3 download/verify/exec | **done — 6 packages tested, live smoke run passed** |
 | 5 | Runner + `--phase`/`--compare` + JSON schema | Deterministic ordering; fairness assertions in tests |
-| 6 | TUI (selection, progress, pause, results) + ASCII fallback | 60-column and `--no-tty` tests |
+| 6 | TUI (selection, progress, pause, results) + ASCII fallback | **done — 60-column and `--no-tty` tests; live pty check** |
 | 7 | Reports (MD + JSON), masking, footnotes, `METHODOLOGY.md`, README | Golden-file tests; reports pasted into PR |
 | 8 | goreleaser, cosign, signing docs, `v0.1.0` | End-to-end on Windows PS 5.1 + PS 7, macOS, Linux |
 
@@ -662,4 +662,4 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 2. ~~Q1, Q2, Q4~~ — **answered**; see §12.
 3. Remaining optional choices **Q3** (windows/arm64 iperf3), **Q5** (licence), **Q6** (datautama mirror), **Q7** (short link). None blocks Phase 2.
 
-**Next step:** Phase 6 — the TUI: server-selection checklist, live progress table, the WARP pause screen, and the results view with side-by-side bars (§14).
+**Next step:** Phase 7 — reports: the Markdown and JSON deliverables, IP masking and footnotes, `METHODOLOGY.md`, and the README (§14).

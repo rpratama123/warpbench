@@ -83,7 +83,9 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 // A bare invocation cannot know which phase to measure, so it must fail as a
 // usage error rather than guessing and writing a result that means nothing.
 func TestBareInvocationRequiresAPhase(t *testing.T) {
-	code, stdout, stderr := runCapture(t, nil, alwaysTTY)
+	// Non-interactive, so the missing phase is a usage error rather than a
+	// prompt to choose one.
+	code, stdout, stderr := runCapture(t, nil, neverTTY)
 
 	if code != exitUsage {
 		t.Errorf("exit code = %d, want %d", code, exitUsage)

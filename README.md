@@ -36,11 +36,16 @@ No admin/root, no pre-installed dependencies beyond the OS.
 | 3 | Server list: schema, loader, cache, `servers.json` v1 | ✅ |
 | 4 | Measurement: stats, ping/timings, four throughput adapters | ✅ |
 | 5 | Runner, `--phase` / `--compare`, JSON schema | ✅ |
-| 6 | TUI + ASCII fallback | ⬜ |
+| 6 | TUI + ASCII fallback | ✅ |
 | 7 | Markdown/JSON reports, `METHODOLOGY.md` | ⬜ |
 | 8 | goreleaser release pipeline, `v0.1.0` | ⬜ |
 
 ## Use
+
+Run it with no arguments on a terminal and it walks you through the whole
+thing: choose how much to measure, pick targets, watch the phase run, flip WARP
+on when it asks, and see the before/after bars. It is the same runner and the
+same result files as the scripted path below, so the two agree by construction.
 
 Measure the ISP path, turn WARP on, measure again, then compare:
 

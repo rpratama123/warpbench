@@ -56,6 +56,7 @@ type options struct {
 	noMask   bool
 	jsonOut  bool
 	yes      bool
+	noColour bool
 
 	// positional holds arguments after the flags, used by --compare.
 	positional []string
@@ -138,6 +139,7 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	fs.BoolVar(&opts.noMask, "no-mask", false, "do not mask the public IP in saved results")
 	fs.BoolVar(&opts.jsonOut, "json", false, "print the result JSON to stdout")
 	fs.BoolVar(&opts.yes, "yes", false, "assume yes to prompts")
+	fs.BoolVar(&opts.noColour, "no-color", false, "never use colour")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -192,6 +194,7 @@ Flags:
   --no-mask          do not mask the public IP in saved results
   --json             print the result JSON to stdout
   --yes              assume yes to prompts
+  --no-color         never use colour
   --servers PATH     use a server list from PATH or a URL
   --offline          do not touch the network; use the cached or embedded list
   --doctor           report the local environment and exit
@@ -285,6 +288,10 @@ func checkWritable(dir string) error {
 // --- the measure path ------------------------------------------------------
 
 func runPhase(opts options, stdout, stderr io.Writer, isTTY func() bool) int {
+	if wantsTUI(opts, isTTY) {
+		return runTUI(opts, stderr)
+	}
+
 	phase := strings.ToLower(strings.TrimSpace(opts.phase))
 	if phase != "baseline" && phase != "warp" {
 		writef(stderr, "warpbench: --phase must be baseline or warp (got %q)\n", opts.phase)
@@ -434,6 +441,19 @@ func checkPhaseState(probe trace.Result, phase string, force bool, stderr io.Wri
 	}
 	writef(stderr, "warpbench: pass --force to measure anyway, and the override will be recorded\n")
 	return exitError
+}
+
+// wantsTUI reports whether the interactive flow should run.
+//
+// The interactive flow is the default when we own a terminal and the user has
+// not said what to measure, because choosing is exactly what the screens are
+// for. Naming a phase, or asking for JSON, is a scriptable request and gets the
+// plain path.
+func wantsTUI(opts options, isTTY func() bool) bool {
+	return isTTY() &&
+		!opts.noTTY &&
+		!opts.jsonOut &&
+		strings.TrimSpace(opts.phase) == ""
 }
 
 func onOff(on bool) string {

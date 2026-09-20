@@ -358,3 +358,32 @@ func TestCheckPhaseState(t *testing.T) {
 		})
 	}
 }
+
+// --- dispatch --------------------------------------------------------------
+
+// Choosing what to measure is what the interactive screens are for, so a
+// terminal and no stated phase means the TUI. Naming a phase, or asking for
+// JSON, is a scriptable request and must stay on the plain path.
+func TestWantsTUI(t *testing.T) {
+	tests := map[string]struct {
+		opts options
+		tty  func() bool
+		want bool
+	}{
+		"terminal, no phase":    {options{}, alwaysTTY, true},
+		"terminal, phase given": {options{phase: "baseline"}, alwaysTTY, false},
+		"terminal, json":        {options{jsonOut: true}, alwaysTTY, false},
+		"terminal, --no-tty":    {options{noTTY: true}, alwaysTTY, false},
+		"terminal, blank phase": {options{phase: "   "}, alwaysTTY, true},
+		"no terminal":           {options{}, neverTTY, false},
+		"no terminal, no phase": {options{phase: ""}, neverTTY, false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := wantsTUI(tc.opts, tc.tty); got != tc.want {
+				t.Errorf("wantsTUI() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
