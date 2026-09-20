@@ -136,6 +136,36 @@ jobs:
       - name: Launcher contract tests
         run: bash tests/launcher_test.sh
 
+  # The launchers construct a release URL from the platform and fetch a bare
+  # binary under an exact name. Nothing in the Go build fails if goreleaser
+  # emits different names -- the launchers would simply 404 for every user, and
+  # only a real release would reveal it. So build a snapshot and check.
+  release-dry-run:
+    name: release dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build a snapshot release
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --skip=publish --skip=sign --clean
+
+      - name: Assert the launcher asset contract
+        run: bash tools/check-release-assets.sh dist
+
+      - name: Check the tools scripts
+        run: shellcheck -s bash tools/check-release-assets.sh
+
   lint-powershell:
     name: lint (powershell)
     runs-on: ubuntu-latest

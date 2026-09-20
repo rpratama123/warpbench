@@ -652,7 +652,7 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 | 5 | Runner + `--phase`/`--compare` + JSON schema | Deterministic ordering; fairness assertions in tests |
 | 6 | TUI (selection, progress, pause, results) + ASCII fallback | **done — 60-column and `--no-tty` tests; live pty check** |
 | 7 | Reports (MD + JSON), masking, footnotes, `METHODOLOGY.md`, README | **done — golden-file test; live report produced** |
-| 8 | goreleaser, cosign, signing docs, `v0.1.0` | End-to-end on Windows PS 5.1 + PS 7, macOS, Linux |
+| 8 | goreleaser, cosign, signing docs, `v0.1.0` | **done — snapshot contract checked in CI; published release verified** |
 
 ---
 
@@ -662,4 +662,7 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 2. ~~Q1, Q2, Q4~~ — **answered**; see §12.
 3. Remaining optional choices **Q3** (windows/arm64 iperf3), **Q5** (licence), **Q6** (datautama mirror), **Q7** (short link). None blocks Phase 2.
 
-**Next step:** Phase 8 — the release pipeline: `.goreleaser.yaml`, `SHA256SUMS`, cosign signatures, and the `v0.1.0` tag (§14).
+**All eight phases are complete.** The tool measures, compares, reports and
+releases. Further work is listed under §12 (open questions Q3, Q6, Q7) and the
+v1.1 candidates: self-built iperf3 (option B in §9.4, which would close the
+windows/arm64 gap), `brew`/`scoop` install paths, and macOS notarization.

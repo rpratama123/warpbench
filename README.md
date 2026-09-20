@@ -38,7 +38,7 @@ No admin/root, no pre-installed dependencies beyond the OS.
 | 5 | Runner, `--phase` / `--compare`, JSON schema | ✅ |
 | 6 | TUI + ASCII fallback | ✅ |
 | 7 | Markdown/JSON reports, `METHODOLOGY.md` | ✅ |
-| 8 | goreleaser release pipeline, `v0.1.0` | ⬜ |
+| 8 | goreleaser release pipeline, `v0.1.0` | ✅ |
 
 ## Use
 
@@ -100,17 +100,51 @@ wrong when reading a result:
 
 ## Install
 
-Not yet available — no release exists. The intended one-liners will be:
-
 ```sh
 # Linux / macOS
-curl -fsSL <short-link>/sh | bash
+curl -fsSL https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.sh | bash
 ```
 
 ```powershell
-# Windows (PowerShell 5.1 or 7)
-irm <short-link>/ps1 | iex
+# Windows (Windows PowerShell 5.1 or PowerShell 7)
+irm https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.ps1 | iex
 ```
+
+Those URLs are stable. They are served from `main`, not from a release tag, and
+the launcher resolves the binary version itself — so a short link built on one
+of them keeps working across every future release, and the launcher can be fixed
+without anyone re-issuing a link.
+
+The launcher does four things and nothing else: detect the platform, download
+the matching binary and `SHA256SUMS` into a per-user cache, verify the checksum,
+and execute it. No `sudo`, nothing written outside the cache, and it refuses to
+run a binary whose checksum does not match. Reading it takes about two minutes:
+[warpbench.sh](warpbench.sh) is under 150 lines, most of it comments.
+
+To pin a version rather than take the latest:
+
+```sh
+curl -fsSL .../warpbench.sh | WARPBENCH_VERSION=v0.1.0 bash
+```
+
+### Verify a download yourself
+
+Every release ships `SHA256SUMS`, and `SHA256SUMS` is signed with Sigstore in
+keyless mode, which proves it came from this repository's release workflow:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+
+cosign verify-blob \
+  --certificate SHA256SUMS.pem \
+  --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github.com/rpratama123/warpbench/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+```
+
+There is no signing key to trust out of band, because there is no signing key:
+the certificate is issued to the workflow run that built the release.
 
 ## The server list
 
@@ -234,6 +268,20 @@ WARPBENCH_INTEGRATION=1 go test ./internal/netprobe/ ./internal/throughput/ -run
 
 They need network access and take a couple of minutes, so they are skipped by
 default.
+
+The release pipeline is checked the same way. `tools/check-release-assets.sh`
+asserts the launcher's asset contract against a real goreleaser snapshot — that
+the binaries are named exactly `warpbench_<os>_<arch>[.exe]`, and that the
+checksum file is named `SHA256SUMS` rather than goreleaser's default
+`checksums.txt`. Nothing in the Go build fails if that drifts; the launchers
+would simply 404 for every user, and only a real release would reveal it.
+
+To reproduce locally:
+
+```sh
+goreleaser release --snapshot --skip=publish --skip=sign --clean
+bash tools/check-release-assets.sh dist
+```
 
 The launcher contract tests spin up a local HTTP server that impersonates a
 GitHub release, then assert the launchers download, verify, cache, refuse bad

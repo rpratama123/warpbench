@@ -1,0 +1,72 @@
+name: Release
+
+# Publishing happens only on a version tag, never on a branch push, so a release
+# is always a deliberate act.
+on:
+  push:
+    tags:
+      - "v*"
+  # A dry run from the Actions tab, which builds every artifact and runs the
+  # asset contract check without publishing anything.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Create the release and upload assets.
+      contents: write
+      # Keyless signing: cosign exchanges this workflow's OIDC identity for a
+      # short-lived certificate, so no signing key is stored anywhere.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # goreleaser builds the changelog from history, and needs the tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify the tree before releasing
+        run: |
+          # A release built from unformatted or failing code is not a release.
+          go vet ./...
+          go test ./...
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4
+
+      - name: Show cosign version
+        run: cosign version
+
+      - name: Release
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: >-
+            release --clean
+            ${{ github.event_name == 'workflow_dispatch' && '--snapshot --skip=publish --skip=sign' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The launchers construct a release URL from the platform and look for a
+      # bare binary under an exact name, plus a file literally called
+      # SHA256SUMS. Assert that against the artifacts actually produced, rather
+      # than trusting the configuration to mean what it says.
+      - name: Assert the launcher asset contract
+        run: bash tools/check-release-assets.sh dist

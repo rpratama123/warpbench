@@ -1,0 +1,97 @@
+name: Verify published release
+
+# Runs after a release is published, and on demand. This is the only check that
+# exercises what a user actually does: fetch the launcher from main and let it
+# download, verify and run the binary. Everything else tests those pieces
+# separately.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install-on-each-platform:
+    name: install (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: "linux bash", os: ubuntu-latest, kind: bash }
+          - { label: "macos bash", os: macos-latest, kind: bash }
+          # Windows PowerShell 5.1 and PowerShell 7 are different interpreters,
+          # and the launcher has to work on both.
+          - { label: "windows PS 5.1", os: windows-latest, kind: powershell }
+          - { label: "windows PS 7", os: windows-latest, kind: pwsh }
+    steps:
+      - name: Install via the documented one-liner (bash)
+        if: matrix.kind == 'bash'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$(curl -fsSL https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.sh | bash -s -- --version)
+          echo "$out"
+          case "$out" in
+            *warpbench*) echo "launcher worked: $out" ;;
+            *) echo "::error::unexpected output from the launcher: $out"; exit 1 ;;
+          esac
+
+      # `irm | iex` cannot forward arguments, so the launcher is fetched to a
+      # file and run with --version. That exercises the same four steps: detect
+      # the platform, download, verify the checksum, exec.
+      - name: Install via the documented one-liner (PowerShell)
+        if: matrix.kind != 'bash'
+        shell: ${{ matrix.kind }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://raw.githubusercontent.com/rpratama123/warpbench/main/warpbench.ps1'
+          $script = Join-Path $env:RUNNER_TEMP 'warpbench.ps1'
+          Invoke-WebRequest -Uri $url -OutFile $script -UseBasicParsing
+          $out = & $script --version
+          Write-Host $out
+          if ($out -notmatch 'warpbench') { throw "unexpected output from the launcher: $out" }
+          Write-Host "$($PSVersionTable.PSVersion) launcher worked"
+
+  verify-signature:
+    name: verify the checksum signature
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4
+
+      - name: Download the release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The latest release, using the same endpoint the launchers use.
+          base="https://github.com/rpratama123/warpbench/releases/latest/download"
+          for f in SHA256SUMS SHA256SUMS.sig SHA256SUMS.pem; do
+            curl -fsSL -o "$f" "$base/$f"
+          done
+
+      - name: Verify the signature is from this repository's workflow
+        run: |
+          set -euo pipefail
+          # Keyless: the certificate proves which workflow produced the file, so
+          # there is no public key to distribute or trust out of band.
+          cosign verify-blob \
+            --certificate SHA256SUMS.pem \
+            --signature SHA256SUMS.sig \
+            --certificate-identity-regexp '^https://github.com/rpratama123/warpbench/' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            SHA256SUMS
+
+      - name: Check the checksum file covers every platform
+        run: |
+          set -euo pipefail
+          for asset in warpbench_linux_amd64 warpbench_linux_arm64 \
+                       warpbench_darwin_amd64 warpbench_darwin_arm64 \
+                       warpbench_windows_amd64.exe warpbench_windows_arm64.exe; do
+            grep -q " $asset\$" SHA256SUMS || { echo "::error::$asset missing from SHA256SUMS"; exit 1; }
+          done
+          echo "SHA256SUMS covers every platform"
