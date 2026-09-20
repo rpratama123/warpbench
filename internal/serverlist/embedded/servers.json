@@ -209,11 +209,11 @@
       "protocol": "librespeed",
       "ping_host": "ams.speedtest.clouvider.net",
       "download_url": "https://ams.speedtest.clouvider.net/backend/garbage.php",
-      "upload_url": "https://ams.speedtest.clouvider.net/backend/empty.php",
-      "capabilities": ["ping", "download", "upload", "timings"],
-      "tier": "quick",
+      "upload_url": null,
+      "capabilities": ["ping", "download", "timings"],
+      "tier": "extended",
       "flags": ["best-effort"],
-      "notes": "LibreSpeed protocol: download via garbage.php?ckSize=N, upload via POST to empty.php. Appears on the canonical librespeed.org community list."
+      "notes": "Download only. This deployment answers 413 Payload Too Large for uploads above roughly 1 MB (verified: 1 MB accepted, 20 MB rejected), so it cannot measure a sustained upload. Appears on the canonical librespeed.org community list."
     },
     {
       "id": "eu-ls-prg-cesnet",
@@ -227,8 +227,9 @@
       "download_url": "https://speedtest.cesnet.cz/backend/garbage.php",
       "upload_url": "https://speedtest.cesnet.cz/backend/empty.php",
       "capabilities": ["ping", "download", "upload", "timings"],
-      "tier": "extended",
-      "flags": ["best-effort"]
+      "tier": "quick",
+      "flags": ["best-effort"],
+      "notes": "Carries the EU upload leg in quick mode: verified to accept a 20 MB upload."
     },
     {
       "id": "eu-ls-hel",
@@ -255,10 +256,11 @@
       "protocol": "librespeed",
       "ping_host": "fra.speedtest.clouvider.net",
       "download_url": "https://fra.speedtest.clouvider.net/backend/garbage.php",
-      "upload_url": "https://fra.speedtest.clouvider.net/backend/empty.php",
-      "capabilities": ["ping", "download", "upload", "timings"],
+      "upload_url": null,
+      "capabilities": ["ping", "download", "timings"],
       "tier": "extended",
-      "flags": ["best-effort"]
+      "flags": ["best-effort"],
+      "notes": "Download only: like its Amsterdam sibling, this deployment answers 413 for uploads above roughly 1 MB."
     },
     {
       "id": "eu-ls-prg-turris",

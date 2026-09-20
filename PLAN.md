@@ -94,7 +94,7 @@ Versions resolved live from `proxy.golang.org` on 2026-09-20 (pinned in `go.mod`
 | `charmbracelet/bubbletea` | v1.3.10 | TUI event loop | **v1, not v2** — v2 is still pre-release; v1 is what `bubbles`/`lipgloss` are stable against. `tview` is heavier and its widgets fight custom inline bar rendering. |
 | `charmbracelet/bubbles` | v1.0.0 | spinner, progress, viewport, key bindings | — |
 | `charmbracelet/lipgloss` | v1.1.0 | layout/colour, `NO_COLOR` + TTY detection | Lipgloss degrades to plain text automatically when colour is disabled. |
-| `prometheus-community/pro-bing` | v0.9.1 | ICMP, unprivileged where possible | `golang.org/x/net/icmp` alone means hand-rolling sequence/timing; `go-ping` is less maintained. |
+| `prometheus-community/pro-bing` | **v0.8.0** (plan said v0.9.1) | ICMP, unprivileged where possible. v0.9.x requires Go 1.25 and would have forced a toolchain bump on every build, so v0.8.0 keeps the Go 1.24 floor. | `golang.org/x/net/icmp` alone means hand-rolling sequence/timing; `go-ping` is less maintained. |
 | `charmbracelet/x/term` | v0.2.2 | TTY size, raw mode, Windows VT enablement | bubbletea dependency anyway. |
 | `goreleaser` | v2.18.2 | cross-build, checksums, releases | Not installed on this host; runs in CI. |
 
@@ -251,32 +251,60 @@ warpbench/
 
 One interface, four implementations. Adding a protocol must not touch the runner, TUI, or report.
 
+**As built (one deviation from the sketch below).** Latency and HTTP timings live in
+`internal/netprobe`, keyed off the server's `ping_host` and a `TimingsURL()`
+provided by the adapter, rather than being methods on every adapter. Three of the four
+protocols would have shared byte-identical implementations, and iperf3 has no HTTP
+surface at all, so putting them on the interface would have meant duplication plus a
+method that always returns "unsupported". The adapter is now only about throughput.
+
 ```go
 type Caps struct{ Ping, Download, Upload, Timings bool }
 
 type Sample struct {
-    Metric   string        // "download" | "upload"
-    Bytes    int64
-    Elapsed  time.Duration
-    Steady   float64       // Mbps, slow-start excluded  (headline)
-    Overall  float64       // Mbps, whole sample
-    Parallel int
-    Proto    string        // "http/1.1" | "h2" | "iperf3"
-    RemoteIP string
-    Err      error
+    Metric      string        // "download" | "upload"
+    Bytes       int64
+    Elapsed     time.Duration
+    SteadyBytes int64         // the window the headline came from
+    SteadyFor   time.Duration
+    SteadyMbps  float64       // slow-start excluded  (headline)
+    OverallMbps float64       // whole sample, reported alongside
+    Parallel    int
+    Proto       string        // "HTTP/1.1" | "HTTP/2.0" | "iperf3"
+    RemoteIP    string
+    Undersized  bool          // below MinBytes: too short to trust
+    Truncated   bool          // the byte guard ended it, not the clock
+    Partial     bool          // an error cut the window short after data moved
 }
 
 type Adapter interface {
     ID() string
     Caps() Caps
-    Ping(ctx context.Context, n int) ([]time.Duration, error)
-    Timings(ctx context.Context, n int) ([]Timing, error)
-    Download(ctx context.Context, o Opts) ([]Sample, error)
-    Upload(ctx context.Context, o Opts) ([]Sample, error)
+    TimingsURL() string       // small GET target, or "" when there is no HTTP surface
+    Download(ctx context.Context, o Opts) (Sample, error)
+    Upload(ctx context.Context, o Opts) (Sample, error)
 }
 ```
 
 The runner is protocol-agnostic: it asks for caps, skips unsupported metrics, and records `N/A` with a reason rather than a zero.
+
+**Four things the real endpoints taught us during Phase 4**, each now enforced by a test:
+
+1. **Cloudflare refuses `bytes >= 100,000,000` with a bare 403** — undocumented, found by
+   bisection (99,999,999 works, 100,000,000 does not). The payload is now 90 MB.
+2. **A finite payload cannot fill a time-governed window.** Cloudflare's ceiling and the
+   100 MB static files both end a fast link's sample in a fraction of the window. Downloads now
+   repeat the request until the clock expires, each still on a fresh connection, bounded by
+   `maxRequestsPerSample`. Live proof: the Cloudflare target moved 112 MB in a 4 s window.
+3. **Two LibreSpeed deployments cannot upload at all.** `ams` and `fra`
+   (`*.speedtest.clouvider.net`) answer **413 Payload Too Large** above roughly 1 MB — verified
+   at 1 MB accepted / 20 MB rejected — while `librespeed.fi`, CESNET and Turris accept 20 MB
+   fine. Both Clouvider entries lost the upload capability, and EU's quick-mode upload leg moved
+   to CESNET.
+4. **A refused upload is not a slow upload.** A non-2xx response to an upload is now a hard
+   error rather than a partial sample: reporting a rate from bytes the server threw away would
+   be a fabricated number. Transport errors *after* data moved still yield a usable partial
+   sample, flagged `Partial` so a shortened window is never presented as a full one.
 
 ---
 
@@ -614,7 +642,7 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 | **1** | `PLAN.md` | **done — approved 2026-09-20** |
 | 2 | Repo scaffold, `go.mod`, launchers (`sh` + `ps1`), CI lint/test workflows | **done — 25/25 launcher checks green, CI green on 3 OSes** |
 | 3 | Server list: schema, loader, cache, embedded fallback, `servers.json` v1, validation Action | **done — 74/74 checks green** |
-| 4 | Measurement: `stats`, `netprobe`, four throughput adapters incl. iperf3 download/verify/exec | Unit + `httptest` integration tests; real-network smoke run |
+| 4 | Measurement: `stats`, `netprobe`, four throughput adapters incl. iperf3 download/verify/exec | **done — 6 packages tested, live smoke run passed** |
 | 5 | Runner + `--phase`/`--compare` + JSON schema | Deterministic ordering; fairness assertions in tests |
 | 6 | TUI (selection, progress, pause, results) + ASCII fallback | 60-column and `--no-tty` tests |
 | 7 | Reports (MD + JSON), masking, footnotes, `METHODOLOGY.md`, README | Golden-file tests; reports pasted into PR |
@@ -628,4 +656,4 @@ Unchanged from §15: no automatic WARP toggling, no root/admin, no Ookla/Speedte
 2. ~~Q1, Q2, Q4~~ — **answered**; see §12.
 3. Remaining optional choices **Q3** (windows/arm64 iperf3), **Q5** (licence), **Q6** (datautama mirror), **Q7** (short link). None blocks Phase 2.
 
-**Next step:** Phase 4 — measurement: `stats`, `netprobe` (ICMP + `httptrace`), and the four throughput adapters, including the iperf3 binary download/verify/exec path (§14).
+**Next step:** Phase 5 — the runner: phase orchestration, fairness rules, live duration estimates, `--phase`/`--compare` and the JSON schema (§14).

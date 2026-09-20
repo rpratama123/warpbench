@@ -34,7 +34,7 @@ No admin/root, no pre-installed dependencies beyond the OS.
 | 1 | [`PLAN.md`](PLAN.md) — architecture, methodology, schema, risks | ✅ approved |
 | 2 | Repo scaffold, `go.mod`, launchers, CI | ✅ |
 | 3 | Server list: schema, loader, cache, `servers.json` v1 | ✅ |
-| 4 | Measurement: stats, ping/timings, four throughput adapters | ⬜ |
+| 4 | Measurement: stats, ping/timings, four throughput adapters | ✅ |
 | 5 | Runner, `--phase` / `--compare`, JSON schema | ⬜ |
 | 6 | TUI + ASCII fallback | ⬜ |
 | 7 | Markdown/JSON reports, `METHODOLOGY.md` | ⬜ |
@@ -130,6 +130,16 @@ golangci-lint run ./...      # v2 config; `golangci-lint config verify` first
 shellcheck -s sh warpbench.sh
 bash tests/launcher_test.sh  # launcher contract tests against a fake release
 ```
+
+The measurement layer also has opt-in tests that hit real servers, including
+downloading and running the pinned iperf3 binary:
+
+```sh
+WARPBENCH_INTEGRATION=1 go test ./internal/netprobe/ ./internal/throughput/ -run Integration -v
+```
+
+They need network access and take a couple of minutes, so they are skipped by
+default.
 
 The launcher contract tests spin up a local HTTP server that impersonates a
 GitHub release, then assert the launchers download, verify, cache, refuse bad
