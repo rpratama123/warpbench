@@ -51,8 +51,21 @@ jobs:
         # Pinned to a full version: this action publishes no moving major tag.
         uses: sigstore/cosign-installer@v4.1.2
 
-      - name: Show cosign version
-        run: cosign version
+      # goreleaser drives cosign as a subprocess, so a change to its command
+      # line surfaces as a signing failure after the whole build has run. Check
+      # the flags we depend on first: cosign deprecated --output-signature and
+      # --output-certificate in favour of --bundle, and that cost one release.
+      - name: Check the cosign CLI supports what we use
+        run: |
+          set -euo pipefail
+          cosign version
+          for subcommand in sign-blob verify-blob; do
+            if ! cosign "$subcommand" --help 2>&1 | grep -q -- '--bundle'; then
+              echo "::error::cosign $subcommand does not support --bundle; .goreleaser.yaml and verify-release.yml assume it does"
+              exit 1
+            fi
+            echo "cosign $subcommand supports --bundle"
+          done
 
       - name: Release
         uses: goreleaser/goreleaser-action@v7

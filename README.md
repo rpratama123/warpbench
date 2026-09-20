@@ -136,8 +136,7 @@ keyless mode, which proves it came from this repository's release workflow:
 sha256sum --check --ignore-missing SHA256SUMS
 
 cosign verify-blob \
-  --certificate SHA256SUMS.pem \
-  --signature SHA256SUMS.sig \
+  --bundle SHA256SUMS.bundle \
   --certificate-identity-regexp '^https://github.com/rpratama123/warpbench/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   SHA256SUMS

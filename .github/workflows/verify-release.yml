@@ -83,7 +83,7 @@ jobs:
           set -euo pipefail
           # The latest release, using the same endpoint the launchers use.
           base="https://github.com/rpratama123/warpbench/releases/latest/download"
-          for f in SHA256SUMS SHA256SUMS.sig SHA256SUMS.pem; do
+          for f in SHA256SUMS SHA256SUMS.bundle; do
             curl -fsSL -o "$f" "$base/$f"
           done
 
@@ -93,8 +93,7 @@ jobs:
           # Keyless: the certificate proves which workflow produced the file, so
           # there is no public key to distribute or trust out of band.
           cosign verify-blob \
-            --certificate SHA256SUMS.pem \
-            --signature SHA256SUMS.sig \
+            --bundle SHA256SUMS.bundle \
             --certificate-identity-regexp '^https://github.com/rpratama123/warpbench/' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             SHA256SUMS

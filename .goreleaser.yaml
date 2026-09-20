@@ -73,12 +73,13 @@ signs:
     cmd: cosign
     artifacts: checksum
     output: true
-    certificate: "${artifact}.pem"
     args:
       - sign-blob
       - "--yes"
-      - "--output-certificate=${certificate}"
-      - "--output-signature=${signature}"
+      # cosign v3 writes signature and certificate together into one bundle.
+      # The older --output-signature / --output-certificate flags are deprecated
+      # and, at the time of writing, fail with an empty bundle path.
+      - "--bundle=${artifact}.bundle"
       - "${artifact}"
 
 release:
@@ -99,12 +100,12 @@ release:
     ```
 
     `SHA256SUMS` is signed with Sigstore in keyless mode, which proves it was
-    produced by this repository's release workflow:
+    produced by this repository's release workflow. The signature and its
+    certificate travel together in one bundle:
 
     ```sh
     cosign verify-blob \
-      --certificate SHA256SUMS.pem \
-      --signature SHA256SUMS.sig \
+      --bundle SHA256SUMS.bundle \
       --certificate-identity-regexp '^https://github.com/rpratama123/warpbench/' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com \
       SHA256SUMS
