@@ -61,9 +61,7 @@ func typeName(v any) string {
 // --- progress --------------------------------------------------------------
 
 func progressWith(servers ...serverlist.Server) ProgressModel {
-	// Glyphs are pinned so a test asserting "✓" does not depend on the console
-	// code page of the machine running it.
-	m := NewProgressModel(NewThemeWithGlyphs(false, true))
+	m := NewProgressModel(NewTheme(false))
 	m, _ = m.Update(phaseStartedMsg{phase: "baseline", servers: servers, estimate: time.Minute})
 	return m
 }

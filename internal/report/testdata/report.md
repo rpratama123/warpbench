@@ -14,7 +14,7 @@
 
 download improved on 3/3 servers (median +1180%), upload improved on 1/1 servers (median +881%), latency changed by a median of -0.1 ms, jitter improved on 0/2
 
-Charts are zero-based and share one scale within a section. A large relative change and a small absolute one can therefore look similar, so the Delta column, not the bar length, is the precise figure.
+Charts are zero-based and share one scale within a section. A large relative change and a small absolute one can therefore look similar, so the Δ column, not the bar length, is the precise figure.
 
 ## Phases
 
@@ -27,7 +27,7 @@ Public IPs are masked to their network prefix. Runnable with `--no-mask` to disc
 
 ## Download
 
-| Server | ISP Mbps | WARP Mbps | Delta | Delta% | Verdict |
+| Server | ISP Mbps | WARP Mbps | Δ | Δ% | Verdict |
 |---|---:|---:|---:|---:|---|
 | id-cf-cgk | 41.20 | 118.40 | +77.20 | +187.4% | better |
 | id-myrepublic-iperf3 | 4.81 | 210.10 | +205.29 | +4268.0% | better |
@@ -44,7 +44,7 @@ sg-linode            ISP  #................ 2.6 Mbps
 
 ## Upload
 
-| Server | ISP Mbps | WARP Mbps | Delta | Delta% | Verdict |
+| Server | ISP Mbps | WARP Mbps | Δ | Δ% | Verdict |
 |---|---:|---:|---:|---:|---|
 | id-cf-cgk | 9.80 | 96.10 | +86.30 | +880.6% | better |
 
@@ -55,7 +55,7 @@ id-cf-cgk ISP  ###........................... 9.8 Mbps
 
 ## Latency (average)
 
-| Server | ISP ms | WARP ms | Delta | Delta% | Verdict |
+| Server | ISP ms | WARP ms | Δ | Δ% | Verdict |
 |---|---:|---:|---:|---:|---|
 | id-cf-cgk | 21.6 | 21.4 | -0.20 | -0.9% | better |
 | sg-linode | 22.0 | 22.1 | +0.10 | +0.5% | same |
@@ -69,7 +69,7 @@ sg-linode ISP  ################################## 22.0 ms
 
 ## Jitter
 
-| Server | ISP ms | WARP ms | Delta | Delta% | Verdict |
+| Server | ISP ms | WARP ms | Δ | Δ% | Verdict |
 |---|---:|---:|---:|---:|---|
 | id-cf-cgk | 0.4 | 0.5 | +0.10 | +25.0% | worse |
 | sg-linode | 0.3 | 0.4 | +0.10 | +33.3% | worse |
@@ -83,7 +83,7 @@ sg-linode ISP  #####################.............. 0.3 ms
 
 ## Packet loss
 
-| Server | ISP % | WARP % | Delta | Delta% | Verdict |
+| Server | ISP % | WARP % | Δ | Δ% | Verdict |
 |---|---:|---:|---:|---:|---|
 | id-cf-cgk | 0.00 | 0.00 | +0.00 | n/a | same |
 | sg-linode | 0.00 | 0.00 | +0.00 | n/a | same |

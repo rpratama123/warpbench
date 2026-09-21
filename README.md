@@ -243,7 +243,7 @@ servers (median +881%), latency changed by a median of -0.1 ms
 
 ## Download
 
-| Server | ISP Mbps | WARP Mbps | Delta | Delta% | Verdict |
+| Server | ISP Mbps | WARP Mbps | Δ | Δ% | Verdict |
 |---|---:|---:|---:|---:|---|
 | id-cf-cgk | 41.20 | 118.40 | +77.20 | +187.4% | better |
 
@@ -261,16 +261,6 @@ The full rendered example lives in
 [`internal/report/testdata/report.md`](internal/report/testdata/report.md), which
 is also the golden file the test suite compares against — so the documented
 format cannot drift from the produced one.
-
-The report is plain ASCII end to end, so it survives being saved, mailed and
-pasted by any editor on any platform. The interactive charts are not: they use
-block characters where the terminal can draw them, and fall back to `#` and `.`
-where it cannot. On Windows that decision follows the console's output code page
-rather than the terminal's name, because Windows re-encodes console output into
-that page and substitutes the same character for both block glyphs — which turns
-every bar into an identical run and leaves the chart saying nothing. A legacy
-console therefore gets ASCII charts automatically; `chcp 65001` first if you want
-the block ones. `--no-color` forces the ASCII set everywhere.
 
 ## Development
 

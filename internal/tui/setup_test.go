@@ -141,10 +141,7 @@ func TestQuitFromTheModeScreen(t *testing.T) {
 
 func selectStage(t *testing.T) SetupModel {
 	t.Helper()
-	// The glyph set is pinned rather than left to NewTheme: colour and glyph
-	// capability are independent, and a test that asserts a specific marker
-	// must not depend on the code page of whatever machine runs it.
-	return press(t, NewSetup(testList(), runner.ModeQuick, NewThemeWithGlyphs(false, true), nil), "enter")
+	return press(t, NewSetup(testList(), runner.ModeQuick, NewTheme(false), nil), "enter")
 }
 
 func TestBackspaceReturnsToTheModeChoice(t *testing.T) {
