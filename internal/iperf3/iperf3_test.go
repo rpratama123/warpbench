@@ -304,6 +304,104 @@ func TestEnsureExtractsArchiveMembers(t *testing.T) {
 	}
 }
 
+// archiveAsset is the shape of the Windows build: the pin covers the archive,
+// not the executable extracted from it.
+func archiveAsset(t *testing.T) (asset, []byte) {
+	t.Helper()
+	archive := makeZip(t, map[string][]byte{
+		"iperf3.exe":  []byte("the executable"),
+		"cygwin1.dll": []byte("the runtime"),
+	})
+	return asset{
+		name:    "iperf3-amd64-win.zip",
+		sha256:  hashOf(archive),
+		binary:  "iperf3.exe",
+		archive: true,
+		members: []string{"iperf3.exe", "cygwin1.dll"},
+	}, archive
+}
+
+// An archive is pinned by the archive's digest, so the archive is what gets
+// cached and re-hashed.
+//
+// Re-hashing the extracted executable against that digest can never succeed,
+// and believing it should was a real bug: every call deleted the cached
+// executable and fetched the archive again. The runner resolves the binary once
+// per sample, so on Windows a single run pulled the asset from the network a
+// dozen times, and the first transient failure -- a 504 in the wild -- cost a
+// measurement outright.
+func TestEnsureReusesVerifiedArchive(t *testing.T) {
+	a, archive := archiveAsset(t)
+	dir := t.TempDir()
+
+	first := &fakeDoer{body: archive}
+	if _, err := ensureAsset(context.Background(), dir, a, first); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if first.calls != 1 {
+		t.Fatalf("first call downloaded %d times, want 1", first.calls)
+	}
+
+	second := &fakeDoer{body: archive}
+	if _, err := ensureAsset(context.Background(), dir, a, second); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if second.calls != 0 {
+		t.Errorf("re-downloaded %d times despite a verified archive in the cache", second.calls)
+	}
+}
+
+// The extracted files can go missing while the archive stays intact, so a
+// missing member is repaired from the copy already on disk rather than
+// refetched.
+func TestEnsureReExtractsWithoutDownloading(t *testing.T) {
+	a, archive := archiveAsset(t)
+	dir := t.TempDir()
+
+	if _, err := ensureAsset(context.Background(), dir, a, &fakeDoer{body: archive}); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "cygwin1.dll")); err != nil {
+		t.Fatal(err)
+	}
+
+	second := &fakeDoer{body: archive}
+	if _, err := ensureAsset(context.Background(), dir, a, second); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if second.calls != 0 {
+		t.Errorf("downloaded %d times to restore one missing member, want 0", second.calls)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cygwin1.dll")); err != nil {
+		t.Errorf("the missing member was not restored: %v", err)
+	}
+}
+
+// Caching the archive must not weaken the pin: a cached copy that no longer
+// matches it is discarded and replaced rather than unpacked.
+func TestEnsureReplacesCorruptedArchive(t *testing.T) {
+	a, archive := archiveAsset(t)
+	dir := t.TempDir()
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archivePath(dir, a), []byte("tampered archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	doer := &fakeDoer{body: archive}
+	if _, err := ensureAsset(context.Background(), dir, a, doer); err != nil {
+		t.Fatalf("ensureAsset() error = %v", err)
+	}
+	if doer.calls != 1 {
+		t.Errorf("downloaded %d times, want 1 after a corrupted archive hit", doer.calls)
+	}
+	if got, _ := os.ReadFile(archivePath(dir, a)); !bytes.Equal(got, archive) {
+		t.Error("the corrupted archive was not replaced with the verified one")
+	}
+}
+
 func TestExtractFailsOnMissingMember(t *testing.T) {
 	archive := makeZip(t, map[string][]byte{"iperf3.exe": []byte("exe")})
 

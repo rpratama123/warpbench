@@ -149,6 +149,24 @@ func TestReportOmitsTheOneSidedSectionWhenThereIsNone(t *testing.T) {
 	}
 }
 
+// A metric that neither phase measured is not part of this run, so naming it
+// would invent a finding about a measurement that was never attempted.
+//
+// This is the rule the TUI used to get wrong, which made the two front ends
+// disagree about the same run.
+func TestReportIgnoresMetricsNeitherPhaseMeasured(t *testing.T) {
+	// Present in both phases, but with no download recorded in either.
+	noDownload := simpleServer("sg-2")
+	noDownload.Download = nil
+
+	base := minimalFile("baseline", simpleServer("sg-1"), noDownload)
+	warp := minimalFile("warp", simpleServer("sg-1"), noDownload)
+
+	if got := render(t, compareOf(t, base, warp)); strings.Contains(got, "## Not measured in both phases") {
+		t.Errorf("a metric neither phase measured was reported as a gap:\n%s", got)
+	}
+}
+
 func TestReportSaysWhenThereAreNoCaveats(t *testing.T) {
 	base := minimalFile("baseline", simpleServer("sg-1"))
 	warp := minimalFile("warp", simpleServer("sg-1"))

@@ -118,9 +118,24 @@ func AssetURL(goos, goarch string) (string, bool) {
 // Ensure returns the path to a verified iperf3 executable, downloading it into
 // cacheDir on first use.
 //
-// The cached copy is re-hashed on every call rather than trusted after a
+// Whatever is cached is re-hashed on every call rather than trusted after a
 // one-time check, because the whole point of pinning a hash is that it is
-// checked against the bytes actually about to be executed.
+// checked against the bytes actually about to be executed. What that means
+// differs by platform, and the difference is the whole of this function's
+// subtlety:
+//
+//   - A plain download is pinned by the hash of the executable itself, so the
+//     executable is what gets re-hashed.
+//   - An archive is pinned by the hash of the archive, because the archive is
+//     the artifact upstream publishes and signs. The executable inside it has
+//     its own hash that nothing pins, so the archive is what gets cached and
+//     re-hashed, and its members are re-extracted from it only when one has
+//     gone missing.
+//
+// Hashing an extracted member against the archive's digest can never succeed.
+// Doing so made every call on Windows delete the cached executable and fetch
+// the archive again, which is slow, impolite to the host, and turns any
+// transient failure into a lost measurement.
 func Ensure(ctx context.Context, cacheDir string, doer Doer) (string, error) {
 	a, ok := assets[runtime.GOOS+"/"+runtime.GOARCH]
 	if !ok {
@@ -133,7 +148,21 @@ func Ensure(ctx context.Context, cacheDir string, doer Doer) (string, error) {
 func ensureAsset(ctx context.Context, dir string, a asset, doer Doer) (string, error) {
 	binPath := filepath.Join(dir, a.binary)
 
-	if info, err := os.Stat(binPath); err == nil && info.Mode().IsRegular() {
+	if a.archive {
+		if archive, ok := verifiedArchive(dir, a); ok {
+			if membersPresent(dir, a.members) {
+				return binPath, nil
+			}
+			// The pin still holds but the extracted files are gone, so put
+			// them back from the copy that was verified rather than fetching
+			// the same bytes again.
+			if err := extract(archive, dir, a.members); err == nil {
+				return binPath, nil
+			}
+			// Verified bytes that will not unpack: do not keep trusting them.
+			_ = os.Remove(archivePath(dir, a))
+		}
+	} else if info, err := os.Stat(binPath); err == nil && info.Mode().IsRegular() {
 		if err := verifyFile(binPath, a.sha256); err == nil {
 			return binPath, nil
 		}
@@ -166,7 +195,14 @@ func ensureAsset(ctx context.Context, dir string, a asset, doer Doer) (string, e
 	}
 
 	if a.archive {
+		// Keep the verified archive. It is the artifact the pin describes, so
+		// holding on to it is what lets a later call prove the extracted files
+		// came from pinned bytes without going back to the network.
+		if err := writeFile(archivePath(dir, a), data); err != nil {
+			return "", err
+		}
 		if err := extract(data, dir, a.members); err != nil {
+			_ = os.Remove(archivePath(dir, a))
 			return "", err
 		}
 	} else {
@@ -176,6 +212,58 @@ func ensureAsset(ctx context.Context, dir string, a asset, doer Doer) (string, e
 	}
 
 	return binPath, nil
+}
+
+// archivePath is where a verified archive is cached.
+func archivePath(dir string, a asset) string { return filepath.Join(dir, a.name) }
+
+// verifiedArchive returns a cached archive's bytes when it is present and still
+// matches the pin.
+//
+// A copy that fails the check is removed rather than left where something else
+// might pick it up.
+func verifiedArchive(dir string, a asset) ([]byte, bool) {
+	path := archivePath(dir, a)
+
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, false
+	}
+	if err := verifyFile(path, a.sha256); err != nil {
+		_ = os.Remove(path)
+		return nil, false
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// membersPresent reports whether every member of an archive is already on disk.
+func membersPresent(dir string, members []string) bool {
+	for _, name := range members {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil || !info.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
+}
+
+// writeFile installs a cached file without granting it execute permission;
+// only the executable itself is made executable.
+func writeFile(path string, data []byte) error {
+	tmp := path + ".part"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("installing %s: %w", path, err)
+	}
+	return nil
 }
 
 func fetch(ctx context.Context, doer Doer, url string) (io.ReadCloser, error) {

@@ -537,6 +537,47 @@ func TestResultsViewFitsTheWidth(t *testing.T) {
 	}
 }
 
+// A metric that neither phase measured is not part of the run, so the note must
+// not offer it as a gap.
+//
+// The report applied this rule and the terminal did not, and the two disagreed
+// about one real run: three servers named as skipped on screen, one in the
+// Markdown. Both now ask results.Delta.Unmeasured.
+func TestSkippedNoteIgnoresMetricsNeitherPhaseMeasured(t *testing.T) {
+	cmp := &results.Comparison{
+		Baseline: &results.File{Phase: "baseline"},
+		Warp:     &results.File{Phase: "warp"},
+		Servers: []results.ServerDelta{
+			{ID: "sg-linode", Download: &results.Delta{Metric: "download",
+				Direction: results.HigherIsBetter, Baseline: 40, Warp: 120,
+				HasBaseline: true, HasWarp: true, AbsDiff: 80, PctChange: 200}},
+			// A real asymmetry: measured on the ISP path and not over WARP.
+			{ID: "eu-one-sided", Download: &results.Delta{Metric: "download",
+				Direction: results.HigherIsBetter, Baseline: 20, HasBaseline: true,
+				Note: "not measured over WARP"}},
+			// Not measured in either phase, so not a gap in this run.
+			{ID: "jp-never-measured", Download: &results.Delta{Metric: "download",
+				Direction: results.HigherIsBetter, Note: "not measured in either phase"}},
+		},
+	}
+
+	m := NewResultsModel(cmp, NewTheme(false))
+	rows, note := m.rowsFor(metricPages()[0])
+
+	if len(rows) != 1 {
+		t.Errorf("drew %d rows, want the 1 comparable server", len(rows))
+	}
+	if !strings.Contains(note, "eu-one-sided") {
+		t.Errorf("note = %q, want it to name the one-sided server", note)
+	}
+	if strings.Contains(note, "jp-never-measured") {
+		t.Errorf("note = %q, but a metric neither phase measured is not a gap", note)
+	}
+	if !strings.Contains(note, "1 server(s)") {
+		t.Errorf("note = %q, want it to count exactly one", note)
+	}
+}
+
 func TestResultsHandlesNoComparison(t *testing.T) {
 	m := NewResultsModel(nil, NewTheme(false))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

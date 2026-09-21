@@ -163,7 +163,10 @@ func (m ResultsModel) rowsFor(spec metricSpec) ([]chart.Row, string) {
 	for _, s := range m.comparison.Servers {
 		d := spec.get(s)
 		if d == nil || !d.Comparable() {
-			if d != nil {
+			// The same rule the Markdown report applies, taken from the same
+			// place so the two front ends cannot disagree about which rows are
+			// missing.
+			if d.Unmeasured() {
 				skipped = append(skipped, s.ID)
 			}
 			continue

@@ -188,7 +188,8 @@ func partition(cmp *results.Comparison, metric results.Metric) (comparable []met
 			// Only a genuinely one-sided measurement belongs in the skipped
 			// list. A metric neither phase measured is simply not part of this
 			// run, and listing every server under it would invent a finding.
-			if d != nil && (d.HasBaseline || d.HasWarp) {
+			// Delta.Unmeasured owns that rule so the TUI cannot disagree.
+			if d.Unmeasured() {
 				skipped = append(skipped, s.ID)
 			}
 			continue

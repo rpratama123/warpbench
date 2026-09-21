@@ -59,6 +59,24 @@ type Delta struct {
 // Comparable reports whether a delta can be computed at all.
 func (d Delta) Comparable() bool { return d.HasBaseline && d.HasWarp }
 
+// Unmeasured reports whether a delta should be named as a gap rather than
+// simply left out.
+//
+// Only a one-sided measurement qualifies. A metric that neither phase measured
+// is not part of this run at all, and naming every server under it would invent
+// a finding about a measurement that was never attempted.
+//
+// This lives here, rather than in each renderer, because the interactive and
+// Markdown front ends must agree about which rows are missing. They did not:
+// the report applied this rule and the TUI did not, so one run showed three
+// servers skipped in the terminal and one in the report.
+//
+// It is a pointer method so that a nil delta is safely "not unmeasured", which
+// is what lets callers ask the question before checking for nil.
+func (d *Delta) Unmeasured() bool {
+	return d != nil && !d.Comparable() && (d.HasBaseline || d.HasWarp)
+}
+
 // Improved reports whether WARP was better. Only meaningful when Comparable.
 func (d Delta) Improved() bool {
 	if !d.Comparable() {

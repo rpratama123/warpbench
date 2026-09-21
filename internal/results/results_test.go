@@ -272,6 +272,31 @@ func TestComputeDeltaHandlesMissingSides(t *testing.T) {
 	}
 }
 
+// Unmeasured decides which gaps get named. It lives here because the terminal
+// and the Markdown report must answer this question identically; when each had
+// its own copy of the rule they disagreed about one real run.
+func TestUnmeasured(t *testing.T) {
+	tests := map[string]struct {
+		d    *Delta
+		want bool
+	}{
+		"nil":                {nil, false},
+		"comparable":         {&Delta{HasBaseline: true, HasWarp: true}, false},
+		"baseline only":      {&Delta{HasBaseline: true}, true},
+		"warp only":          {&Delta{HasWarp: true}, true},
+		"neither phase":      {&Delta{}, false},
+		"neither, with note": {&Delta{Note: "not measured in either phase"}, false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.d.Unmeasured(); got != tc.want {
+				t.Errorf("Unmeasured() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // A zero baseline makes a percentage meaningless; the absolute change is still
 // useful, and the note must say why.
 func TestComputeDeltaZeroBaseline(t *testing.T) {
